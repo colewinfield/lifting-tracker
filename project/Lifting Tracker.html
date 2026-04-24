@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lifting Tracker · M3 Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,600;8..144,700&family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: 'Roboto Flex', system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="tokens.jsx"></script>
+<script type="text/babel" src="icons.jsx"></script>
+<script type="text/babel" src="m3-components.jsx"></script>
+<script type="text/babel" src="program-data.jsx"></script>
+<script type="text/babel" src="screens/today.jsx"></script>
+<script type="text/babel" src="screens/program.jsx"></script>
+<script type="text/babel" src="screens/exercise-detail.jsx"></script>
+<script type="text/babel" src="screens/extras.jsx"></script>
+<script type="text/babel" src="screens/extras2.jsx"></script>
+<script type="text/babel" src="screens/program-edit.jsx"></script>
+
+<script type="text/babel" data-presets="react">
+
+const DEFAULTS = /*EDITMODE-BEGIN*/{
+  "dark": true,
+  "weekNavStyle": "ring",
+  "effortViz": "dot",
+  "setLoggingStyle": "stepper",
+  "progressViz": "inline",
+  "density": "comfortable"
+}/*EDITMODE-END*/;
+
+function AndroidFrame({ c, children, width = 384, height = 820 }) {
+  return (
+    <div style={{
+      width, height, borderRadius: 44,
+      background: c.surface,
+      border: `8px solid rgba(50,40,35,0.85)`,
+      boxShadow: '0 30px 80px rgba(0,0,0,0.3)',
+      overflow: 'hidden', position: 'relative',
+      display: 'flex', flexDirection: 'column',
+    }}>
+      <M3StatusBar c={c} />
+      <div style={{ flex: 1, overflow: 'hidden', position: 'relative', background: c.surface }}>
+        {children}
+      </div>
+      <M3NavBarGesture c={c} />
+    </div>
+  );
+}
+
+function FullApp({ dark, scene = 'today', initialSets }) {
+  const c = dark ? M3_DARK : M3_LIGHT;
+  const [tab, setTab] = React.useState(scene);
+  const [state, setState] = React.useState({
+    sets: initialSets || {
+      'smith-squat': [
+        { w: 225, r: 5, done: true },
+        { w: 225, r: 5, done: true },
+        { w: 230, r: 5, done: false },
+      ],
+      'rdl-1': [
+        { w: 185, r: 8, done: false },
+      ],
+    },
+    swaps: {},
+    notes: { 'flat-db': [{ date: 'Tue, Apr 7', whoopsy: true, text: '85s were busy, used 80s' }] },
+  });
+  const [swap, setSwap] = React.useState(null);
+  const [notes, setNotes] = React.useState(null);
+  const [detailLift, setDetailLift] = React.useState(null);
+
+  const content = detailLift ? (
+    <ExerciseDetailScreen c={c} lift={detailLift} onBack={() => setDetailLift(null)} />
+  ) : (
+    <>
+      {tab === 'today' && (
+        <TodayScreen c={c} state={state} setState={setState}
+          onOpenExercise={setDetailLift}
+          onSwap={setSwap}
+          onNotes={setNotes}
+        />
+      )}
+      {tab === 'program' && <ProgramScreen c={c} weekNavStyle="ring" />}
+      {tab === 'history' && <HistoryScreen c={c} />}
+      {tab === 'profile' && <ProfileScreen c={c} dark={dark} />}
+    </>
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' }}>
+      <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+        {content}
+        <SwapSheet c={c} lift={swap} onClose={() => setSwap(null)}
+          onSwap={(alt) => {
+            setState(s => ({ ...s, swaps: { ...s.swaps, [swap.id]: alt } }));
+            setSwap(null);
+          }} />
+        <NotesSheet c={c} lift={notes} notes={state.notes}
+          setNotes={(fn) => setState(s => ({ ...s, notes: typeof fn === 'function' ? fn(s.notes) : fn }))}
+          onClose={() => setNotes(null)} />
+      </div>
+      {!detailLift && (
+        <M3NavBar c={c} active={tab} onChange={setTab} items={[
+          { id: 'today',   icon: 'dumbbell', label: 'Today' },
+          { id: 'program', icon: 'calendar', label: 'Program' },
+          { id: 'history', icon: 'stats',    label: 'History' },
+          { id: 'profile', icon: 'profile',  label: 'You' },
+        ]} />
+      )}
+    </div>
+  );
+}
+
+function ScreenWrap({ dark, children, showNavbar = true, navTab = 'today' }) {
+  const c = dark ? M3_DARK : M3_LIGHT;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+        {children}
+      </div>
+      {showNavbar && (
+        <M3NavBar c={c} active={navTab} onChange={()=>{}} items={[
+          { id: 'today',   icon: 'dumbbell', label: 'Today' },
+          { id: 'program', icon: 'calendar', label: 'Program' },
+          { id: 'history', icon: 'stats',    label: 'History' },
+          { id: 'profile', icon: 'profile',  label: 'You' },
+        ]} />
+      )}
+    </div>
+  );
+}
+
+function TweaksPanel({ tweaks, setTweaks }) {
+  const [open, setOpen] = React.useState(false);
+  const [active, setActive] = React.useState(false);
+
+  React.useEffect(() => {
+    const onMsg = (e) => {
+      if (e.data?.type === '__activate_edit_mode') setActive(true);
+      if (e.data?.type === '__deactivate_edit_mode') setActive(false);
+    };
+    window.addEventListener('message', onMsg);
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  if (!active) return null;
+
+  const update = (k, v) => {
+    const next = { ...tweaks, [k]: v };
+    setTweaks(next);
+    window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { [k]: v } }, '*');
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', bottom: 16, right: 16, zIndex: 200,
+      background: '#1c1915', color: '#fff', borderRadius: 16,
+      boxShadow: '0 12px 40px rgba(0,0,0,0.4)',
+      width: open ? 300 : 'auto', overflow: 'hidden',
+      fontFamily: '"Roboto Flex", system-ui, sans-serif',
+    }}>
+      <button onClick={() => setOpen(!open)} style={{
+        width: '100%', padding: open ? '14px 16px' : 12,
+        border: 'none', background: 'transparent', color: '#fff',
+        display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+        fontFamily: 'inherit', fontSize: 14, fontWeight: 600,
+      }}>
+        <svg width="18" height="18" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58L19.24 6l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54h-3.84l-.36 2.54a7.03 7.03 0 0 0-1.62.94L6.66 6 4.74 9.48l2.03 1.58c-.05.3-.09.63-.09.94 0 .31.02.64.07.94l-2.03 1.58L6.66 18l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54h3.84l.36-2.54c.59-.24 1.13-.56 1.62-.94L19.24 18l1.92-3.48-2.02-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z" fill="currentColor"/></svg>
+        {open ? 'Tweaks' : ''}
+      </button>
+      {open && (
+        <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <TweakGroup label="Theme">
+            <TweakToggle options={[['true','Dark'],['false','Light']]} value={String(tweaks.dark)} onChange={v => update('dark', v === 'true')} />
+          </TweakGroup>
+          <TweakGroup label="Week navigation">
+            <TweakToggle options={[['strip','Strip'],['ring','Ring'],['grid','Grid']]} value={tweaks.weekNavStyle} onChange={v => update('weekNavStyle', v)} />
+          </TweakGroup>
+          <TweakGroup label="Effort indicator">
+            <TweakToggle options={[['dot','Dot'],['bar','Bar'],['border','Border']]} value={tweaks.effortViz} onChange={v => update('effortViz', v)} />
+          </TweakGroup>
+          <TweakGroup label="Set input">
+            <TweakToggle options={[['stepper','Stepper'],['keypad','Keypad'],['quick','Quick']]} value={tweaks.setLoggingStyle} onChange={v => update('setLoggingStyle', v)} />
+          </TweakGroup>
+          <TweakGroup label="Progress vs last week">
+            <TweakToggle options={[['inline','Badge'],['spark','Sparkline'],['diff','Diff']]} value={tweaks.progressViz} onChange={v => update('progressViz', v)} />
+          </TweakGroup>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TweakGroup({ label, children }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.8, opacity: 0.6, marginBottom: 6 }}>
+        {label.toUpperCase()}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function TweakToggle({ options, value, onChange }) {
+  return (
+    <div style={{ display: 'flex', background: 'rgba(255,255,255,0.08)', borderRadius: 8, padding: 3, gap: 2 }}>
+      {options.map(([val, label]) => (
+        <button key={val} onClick={() => onChange(val)} style={{
+          flex: 1, height: 32, border: 'none',
+          background: value === val ? '#FFB68B' : 'transparent',
+          color: value === val ? '#522300' : '#fff',
+          borderRadius: 6, cursor: 'pointer',
+          fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+        }}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+function SetLogKeypadVariant({ dark }) {
+  const c = dark ? M3_DARK : M3_LIGHT;
+  const lift = PROGRAM.days[0].lifts[0];
+  const keys = ['1','2','3','4','5','6','7','8','9','.','0','⌫'];
+  return (
+    <div style={{ background: c.surface, height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '12px 16px 4px', display: 'flex', alignItems: 'center' }}>
+        <IconButton c={c} icon="back" />
+        <div style={{ flex: 1 }} />
+      </div>
+      <div style={{ padding: '8px 20px 16px' }}>
+        <div style={{ ...typeStyle('labelM'), color: c.onSurfaceVariant, letterSpacing: 0.5 }}>SET 3 OF 5</div>
+        <div style={{ ...typeStyle('headlineM'), color: c.onSurface, fontWeight: 500, marginTop: 2 }}>{lift.name}</div>
+        <div style={{ ...typeStyle('bodyS'), color: c.onSurfaceVariant, marginTop: 2 }}>
+          Last week · 225 lb × 5 reps
+        </div>
+      </div>
+
+      <div style={{ padding: '0 16px', flex: 1, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <M3Card c={c} variant="filled" style={{ padding: 20 }}>
+          <div style={{ ...typeStyle('labelM'), color: c.primary, letterSpacing: 0.8 }}>WEIGHT</div>
+          <div style={{ ...typeStyle('display'), color: c.onSurface, fontFamily: M3_TYPE.mono, lineHeight: '56px', letterSpacing: -2 }}>
+            230
+            <span style={{ ...typeStyle('titleM'), color: c.onSurfaceVariant, marginLeft: 8 }}>lb</span>
+          </div>
+        </M3Card>
+        <M3Card c={c} variant="outlined" style={{ padding: 20 }}>
+          <div style={{ ...typeStyle('labelM'), color: c.onSurfaceVariant, letterSpacing: 0.8 }}>REPS</div>
+          <div style={{ ...typeStyle('display'), color: c.onSurfaceVariant, fontFamily: M3_TYPE.mono, lineHeight: '56px', letterSpacing: -2 }}>
+            5
+          </div>
+        </M3Card>
+      </div>
+
+      <div style={{
+        padding: 12, background: c.surfaceContainerLow,
+        display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6,
+      }}>
+        {keys.map(k => (
+          <button key={k} style={{
+            height: 52, borderRadius: 12, border: 'none',
+            background: k === '⌫' ? c.surfaceContainerHigh : c.surfaceContainer,
+            color: c.onSurface, cursor: 'pointer',
+            ...typeStyle('headlineS'), fontFamily: M3_TYPE.mono,
+          }}>{k}</button>
+        ))}
+      </div>
+      <div style={{ padding: 12 }}>
+        <M3Button c={c} variant="filled" fullWidth size="lg" icon="check">Save set</M3Button>
+      </div>
+    </div>
+  );
+}
+
+function SetLogQuickVariant({ dark }) {
+  const c = dark ? M3_DARK : M3_LIGHT;
+  const lift = PROGRAM.days[0].lifts[0];
+  return (
+    <div style={{ background: c.surface, height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '12px 16px 4px', display: 'flex', alignItems: 'center' }}>
+        <IconButton c={c} icon="back" />
+        <div style={{ flex: 1 }} />
+        <IconButton c={c} icon="more" />
+      </div>
+
+      <div style={{ padding: '8px 20px 20px' }}>
+        <div style={{ ...typeStyle('headlineS'), color: c.onSurface, fontWeight: 500 }}>{lift.name}</div>
+        <div style={{ ...typeStyle('bodyS'), color: c.onSurfaceVariant, marginTop: 2 }}>
+          3–5 × 5 · Week 4
+        </div>
+      </div>
+
+      <div style={{ padding: '0 16px', flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {[
+          { n: 1, w: 225, r: 5, done: true,  prev: '225×5' },
+          { n: 2, w: 225, r: 5, done: true,  prev: '225×5' },
+          { n: 3, w: 230, r: 5, done: false, prev: '225×4', active: true },
+          { n: 4, w: null, r: null, done: false, prev: '–' },
+          { n: 5, w: null, r: null, done: false, prev: '–' },
+        ].map(s => (
+          <div key={s.n} style={{
+            padding: '12px 14px', borderRadius: 14,
+            background: s.active ? c.primaryContainer : s.done ? c.secondaryContainer : c.surfaceContainerHigh,
+            color: s.active ? c.onPrimaryContainer : s.done ? c.onSecondaryContainer : c.onSurface,
+            display: 'flex', alignItems: 'center', gap: 12,
+            border: s.active ? `2px solid ${c.primary}` : 'none',
+          }}>
+            <div style={{
+              ...typeStyle('titleL'), fontFamily: M3_TYPE.mono, width: 24, textAlign: 'center',
+            }}>{s.n}</div>
+            <div style={{ flex: 1 }}>
+              {s.w != null ? (
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <span style={{ ...typeStyle('headlineS'), fontFamily: M3_TYPE.mono }}>{s.w}</span>
+                  <span style={{ ...typeStyle('labelM'), opacity: 0.7 }}>lb ×</span>
+                  <span style={{ ...typeStyle('headlineS'), fontFamily: M3_TYPE.mono }}>{s.r}</span>
+                </div>
+              ) : (
+                <div style={{ ...typeStyle('bodyM'), opacity: 0.5 }}>Tap to log</div>
+              )}
+              <div style={{ ...typeStyle('labelS'), opacity: 0.7, marginTop: 2, letterSpacing: 0.3 }}>
+                LAST · {s.prev}
+              </div>
+            </div>
+            {s.done && <Icon name="check" size={22} />}
+            {s.active && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button style={{
+                  width: 36, height: 36, borderRadius: 18, border: 'none',
+                  background: 'rgba(0,0,0,0.12)', color: 'inherit', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}><Icon name="check" size={20} /></button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ padding: '16px 16px 12px', display: 'flex', gap: 8 }}>
+        <M3Button c={c} variant="filled" fullWidth icon="check">Log set 3</M3Button>
+      </div>
+    </div>
+  );
+}
+
+function ExerciseDetailGraphPreset({ c }) {
+  return <ExerciseDetailScreen c={c} lift={PROGRAM.days[0].lifts[0]} initialTab="graph" />;
+}
+
+function SwapPreset({ c }) {
+  const lift = PROGRAM.days[1].lifts[4];
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <TodayScreen c={c}
+        state={{ sets: {}, swaps: {}, notes: {} }}
+        setState={()=>{}}
+        onOpenExercise={()=>{}}
+        onSwap={()=>{}}
+        onNotes={()=>{}}
+      />
+      <SwapSheet c={c} lift={lift} onClose={()=>{}} onSwap={()=>{}} />
+    </div>
+  );
+}
+
+function NotesPreset({ c }) {
+  const lift = PROGRAM.days[1].lifts[0];
+  const notes = { [lift.id]: [
+    { date: 'Wk 3 · Tue Apr 14', whoopsy: false, text: '85s felt solid on last set. Bump to 90 next week.' },
+    { date: 'Wk 2 · Tue Apr 7',  whoopsy: true,  text: '85s were busy, used 80s. Doesn\'t count for progression.' },
+    { date: 'Wk 1 · Tue Mar 31', whoopsy: false, text: 'Right shoulder clicking on the bottom. Watch form.' },
+  ]};
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <TodayScreen c={c}
+        state={{ sets: {}, swaps: {}, notes }}
+        setState={()=>{}}
+        onOpenExercise={()=>{}}
+        onSwap={()=>{}}
+        onNotes={()=>{}}
+      />
+      <NotesSheet c={c} lift={lift} notes={notes} setNotes={()=>{}} onClose={()=>{}} />
+    </div>
+  );
+}
+
+function App() {
+  const [tweaks, setTweaks] = React.useState(DEFAULTS);
+  const dark = tweaks.dark;
+  const c = dark ? M3_DARK : M3_LIGHT;
+
+  return (
+    <>
+      <DesignCanvas>
+
+        <DCSection id="hero" title="Lifting Tracker · Android / Material 3"
+          subtitle="Hi-fi Compose mockups. Dark default, light toggle, cyclic 9-week programming.">
+
+          <DCArtboard id="today" label="1 · Today (active workout)" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <FullApp dark={dark} scene="today" />
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="today-light" label="2 · Today (light theme)" width={400} height={820}>
+            <AndroidFrame c={M3_LIGHT}>
+              <FullApp dark={false} scene="today" />
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="program" label="3 · Program · 9-week cycle" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <ScreenWrap dark={dark} navTab="program">
+                <ProgramScreen c={c} weekNavStyle="ring" />
+              </ScreenWrap>
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="history" label="4 · History + graphs" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <ScreenWrap dark={dark} navTab="history">
+                <HistoryScreen c={c} />
+              </ScreenWrap>
+            </AndroidFrame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="core-flows" title="Core flows"
+          subtitle="Exercise detail, swap, notes.">
+
+          <DCArtboard id="detail" label="Exercise detail · History" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <ExerciseDetailScreen c={c} lift={PROGRAM.days[0].lifts[0]} />
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="detail-graph" label="Exercise detail · Graph" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <ExerciseDetailGraphPreset c={c} />
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="swap" label="Swap sheet" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <SwapPreset c={c} />
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="notes" label="Notes + whoopsy" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <NotesPreset c={c} />
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="db" label="Exercise DB" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <ScreenWrap dark={dark} navTab="program">
+                <ExerciseDBScreen c={c} />
+              </ScreenWrap>
+            </AndroidFrame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="set-log-variants" title="Set-logging variants"
+          subtitle="Three approaches to the most-touched screen. No iOS rollers.">
+
+          <DCArtboard id="slv-stepper" label="A · Stepper (default)" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <FullApp dark={dark} scene="today" />
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="slv-keypad" label="B · Focused + numpad" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <SetLogKeypadVariant dark={dark} />
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="slv-quick" label="C · Quick-tap rows" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <SetLogQuickVariant dark={dark} />
+            </AndroidFrame>
+          </DCArtboard>
+        </DCSection>
+
+
+        <DCSection id="create-program" title="Create / edit a program"
+          subtitle="From Program Library → Build custom, or Duplicate & edit. Flow: summary → day → lift.">
+
+          <DCArtboard id="prog-new" label="1 · New program (blank)" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <ProgramEditScreen c={c} isNew />
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="prog-edit" label="2 · Edit program (duplicated)" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <ProgramEditScreen c={c} />
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="day-edit" label="3 · Edit day" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <DayEditScreen c={c} />
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="lift-edit" label="4 · Edit lift" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <LiftEditScreen c={c} />
+            </AndroidFrame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="supporting" title="Supporting screens"
+          subtitle="Onboarding, programs library, reminders, profile.">
+
+          <DCArtboard id="onboarding" label="Onboarding" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <OnboardingScreen c={c} />
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="programs" label="Program library" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <ScreenWrap dark={dark} navTab="program">
+                <ProgramSelectScreen c={c} />
+              </ScreenWrap>
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="reminders" label="Reminders (meanness tiers)" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <ScreenWrap dark={dark} navTab="profile">
+                <NotificationsScreen c={c} />
+              </ScreenWrap>
+            </AndroidFrame>
+          </DCArtboard>
+
+          <DCArtboard id="profile" label="Profile" width={400} height={820}>
+            <AndroidFrame c={c}>
+              <ScreenWrap dark={dark} navTab="profile">
+                <ProfileScreen c={c} dark={dark} onToggleDark={()=>{}} />
+              </ScreenWrap>
+            </AndroidFrame>
+          </DCArtboard>
+        </DCSection>
+
+        <DCPostIt top={-30} left={60} rotate={-3}>
+          <b>Design system:</b> Material 3 tokens · Roboto Flex + Roboto Mono · warm-orange primary.
+        </DCPostIt>
+        <DCPostIt top={-30} left={340} rotate={2}>
+          Tap <b>Tweaks</b> in the toolbar to swap theme, week-nav style, effort viz, set input, and progress viz.
+        </DCPostIt>
+
+      </DesignCanvas>
+      <TweaksPanel tweaks={tweaks} setTweaks={setTweaks} />
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
