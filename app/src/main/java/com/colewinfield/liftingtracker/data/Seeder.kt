@@ -44,7 +44,7 @@ object Seeder {
      */
     private suspend fun seedHistory(sessionDao: SessionDao) {
         val program = SampleData.program
-        val currentWeek = SampleData.current.week
+        val currentWeek = SampleData.defaultCurrentWeek
         val cycleLength = program.cycleLength
 
         val liftToDay: Map<String, String> = program.days

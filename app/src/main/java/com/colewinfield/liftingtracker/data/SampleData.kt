@@ -1,8 +1,13 @@
 package com.colewinfield.liftingtracker.data
 
-// Mirrors project/design_handoff_lifting_tracker/design-source/program-data.jsx.
-// Used as the in-memory seed until Room is wired in.
+// Mirrors project/design_handoff_lifting_tracker/design-source/program-data.jsx, adapted to the
+// owner's actual lift schedule: Wed/Thu/Sat/Sun/Mon. Tuesday and Friday are implicit rest days
+// (no entry in program.days). "Today's lift" is derived at runtime via Weekday.today().
 object SampleData {
+    // Default cycle position for a fresh install. The user moves this via the Profile screen
+    // until auto-advance lands.
+    const val defaultCurrentWeek: Int = 4
+
     val program: Program = Program(
         id = "p1",
         name = "Upper/Lower Hybrid",
@@ -10,7 +15,7 @@ object SampleData {
         deloadWeek = 9,
         days = listOf(
             Day(
-                id = "d1", name = "Lower 1", dayOfWeek = "Monday",
+                id = "d1", name = "Lower 1", dayOfWeek = Weekday.WED,
                 focus = "Quads · Hamstrings · Calves",
                 lifts = listOf(
                     Lift("smith-squat",  "Smith Machine Squat",  3..5, 5..5,   Effort.HIGH, "Quads",      "Smith"),
@@ -22,7 +27,7 @@ object SampleData {
                 ),
             ),
             Day(
-                id = "d2", name = "Upper 1", dayOfWeek = "Tuesday",
+                id = "d2", name = "Upper 1", dayOfWeek = Weekday.THU,
                 focus = "Chest · Back · Arms",
                 lifts = listOf(
                     Lift("flat-db",      "Flat Dumbbell Bench Press",    3..5, 8..10,  Effort.HIGH, "Chest",     "Dumbbell"),
@@ -33,9 +38,8 @@ object SampleData {
                     Lift("shoulder-1",   "Machine Shoulder Press",       3..7, 8..10,  Effort.MED,  "Shoulders", "Machine"),
                 ),
             ),
-            Day(id = "d3", name = "Rest", dayOfWeek = "Wednesday", isRest = true),
             Day(
-                id = "d4", name = "Lower 2", dayOfWeek = "Thursday",
+                id = "d3", name = "Lower 2", dayOfWeek = Weekday.SAT,
                 focus = "Quads · Hamstrings · Calves",
                 lifts = listOf(
                     Lift("leg-press",    "Leg Press",            3..5, 10..12, Effort.HIGH, "Quads",      "Machine"),
@@ -47,7 +51,7 @@ object SampleData {
                 ),
             ),
             Day(
-                id = "d5", name = "Upper 2", dayOfWeek = "Friday",
+                id = "d4", name = "Upper 2", dayOfWeek = Weekday.SUN,
                 focus = "Chest · Back · Arms · Delts",
                 lifts = listOf(
                     Lift("incline-db-2", "Incline Dumbbell Bench Press", 3..5, 10..12, Effort.HIGH, "Chest",     "Dumbbell"),
@@ -59,7 +63,7 @@ object SampleData {
                 ),
             ),
             Day(
-                id = "d6", name = "Pump Day", dayOfWeek = "Monday",
+                id = "d5", name = "Pump Day", dayOfWeek = Weekday.MON,
                 focus = "High-volume full upper",
                 lifts = listOf(
                     Lift("pullup",     "Pull-ups",                 3..3, 6..10,  Effort.HIGH, "Back",    "Bodyweight"),
@@ -120,6 +124,4 @@ object SampleData {
             HistoryEntry(1, "Tue, Mar 31", listOf(HistorySet(80.0, 10), HistorySet(80.0, 9), HistorySet(80.0, 8)), notes = "85s were busy"),
         ),
     )
-
-    val current: CurrentState = CurrentState(week = 4, dayId = "d1", dayIndex = 0)
 }

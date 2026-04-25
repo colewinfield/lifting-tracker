@@ -4,9 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.colewinfield.liftingtracker.data.AppSettings
 import com.colewinfield.liftingtracker.data.LiftingRepository
 import com.colewinfield.liftingtracker.data.Program
-import com.colewinfield.liftingtracker.data.SampleData
+import com.colewinfield.liftingtracker.data.SettingsRepository
 import com.colewinfield.liftingtracker.data.db.PerformedSetEntity
 import com.colewinfield.liftingtracker.data.db.SessionEntity
 import kotlinx.coroutines.flow.SharingStarted
@@ -54,23 +55,28 @@ data class MuscleVolume(val muscle: String, val sets: Int)
 
 class HistoryViewModel(
     private val repo: LiftingRepository,
+    private val settingsRepo: SettingsRepository,
 ) : ViewModel() {
 
-    // TODO: sourced from a SettingsDao / DataStore once Profile/Onboarding is wired.
-    private val currentWeek = SampleData.current.week
+    // Cycle number isn't in settings yet — first cycle is 1; will become a counter once finishing
+    // a session at week == cycleLength rolls over to week 1 of cycle N+1.
     private val cycleNumber = 1
 
     val state: StateFlow<HistoryUiState> = combine(
         repo.observeCurrentProgram(),
         repo.observeAllSessions(),
         repo.observeAllPerformedSets(),
-    ) { program, sessions, sets ->
-        if (program == null) HistoryUiState.Empty.copy(cycleLabel = "Cycle $cycleNumber · Week $currentWeek")
-        else compute(program, sessions, sets)
+        settingsRepo.settings,
+    ) { program, sessions, sets, settings ->
+        if (program == null) {
+            HistoryUiState.Empty.copy(cycleLabel = "Cycle $cycleNumber · Week ${settings.currentWeek}")
+        } else compute(program, sessions, sets, settings.currentWeek)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = HistoryUiState.Empty,
+        initialValue = HistoryUiState.Empty.copy(
+            cycleLabel = "Cycle $cycleNumber · Week ${AppSettings.Defaults.currentWeek}",
+        ),
     )
 
     init {
@@ -81,6 +87,7 @@ class HistoryViewModel(
         program: Program,
         sessions: List<SessionEntity>,
         sets: List<PerformedSetEntity>,
+        currentWeek: Int,
     ): HistoryUiState {
         val now = System.currentTimeMillis()
         val cycleStartMs = now - TimeUnit.DAYS.toMillis(((currentWeek - 0.5) * 7).toLong())
@@ -164,8 +171,8 @@ class HistoryViewModel(
     }
 
     companion object {
-        fun factory(repo: LiftingRepository) = viewModelFactory {
-            initializer { HistoryViewModel(repo) }
+        fun factory(repo: LiftingRepository, settingsRepo: SettingsRepository) = viewModelFactory {
+            initializer { HistoryViewModel(repo, settingsRepo) }
         }
     }
 }

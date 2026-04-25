@@ -4,14 +4,18 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -19,6 +23,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.colewinfield.liftingtracker.data.AppContainer
+import com.colewinfield.liftingtracker.data.AppSettings
+import com.colewinfield.liftingtracker.data.ThemeMode
 import com.colewinfield.liftingtracker.ui.components.LtNavBar
 import com.colewinfield.liftingtracker.ui.components.LtNavItem
 import com.colewinfield.liftingtracker.ui.navigation.LtDestination
@@ -26,8 +33,8 @@ import com.colewinfield.liftingtracker.ui.screens.DetailTab
 import com.colewinfield.liftingtracker.ui.screens.ExerciseDetailScreen
 import com.colewinfield.liftingtracker.ui.screens.HistoryScreen
 import com.colewinfield.liftingtracker.ui.screens.ProgramScreen
+import com.colewinfield.liftingtracker.ui.screens.ProfileScreen
 import com.colewinfield.liftingtracker.ui.screens.TodayScreen
-import com.colewinfield.liftingtracker.ui.screens.YouScreen
 import com.colewinfield.liftingtracker.ui.theme.LiftingTrackerTheme
 
 class MainActivity : ComponentActivity() {
@@ -35,7 +42,20 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            LiftingTrackerTheme {
+            val context = LocalContext.current
+            val settingsRepo = remember(context) { AppContainer.settings(context) }
+            val settings by settingsRepo.settings
+                .collectAsStateWithLifecycle(initialValue = AppSettings.Defaults)
+            val systemDark = isSystemInDarkTheme()
+            val darkTheme = when (settings.themeMode) {
+                ThemeMode.SYSTEM -> systemDark
+                ThemeMode.LIGHT -> false
+                ThemeMode.DARK -> true
+            }
+            LiftingTrackerTheme(
+                darkTheme = darkTheme,
+                dynamicColor = settings.useDynamicColor,
+            ) {
                 LiftingTrackerApp()
             }
         }
@@ -88,7 +108,7 @@ fun LiftingTrackerApp() {
             }
             composable(LtDestination.Program.route) { ProgramScreen() }
             composable(LtDestination.History.route) { HistoryScreen() }
-            composable(LtDestination.You.route)     { YouScreen() }
+            composable(LtDestination.You.route)     { ProfileScreen() }
             composable(
                 route = "exercise/{liftId}?tab={tab}",
                 arguments = listOf(

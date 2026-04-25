@@ -4,9 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.colewinfield.liftingtracker.data.AppSettings
 import com.colewinfield.liftingtracker.data.LiftingRepository
 import com.colewinfield.liftingtracker.data.Program
-import com.colewinfield.liftingtracker.data.SampleData
+import com.colewinfield.liftingtracker.data.SettingsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -26,26 +27,32 @@ data class ProgramUiState(
 
 class ProgramViewModel(
     private val repo: LiftingRepository,
+    private val settingsRepo: SettingsRepository,
 ) : ViewModel() {
 
-    // TODO: source from a SettingsDao / DataStore once Profile/Onboarding is wired.
-    private val currentWeek = SampleData.current.week
-
-    private val selectedWeek = MutableStateFlow(currentWeek)
+    // -1 = not yet user-selected. The state flow falls back to currentWeek until the user taps
+    // a chip, so a fresh launch always lands on "now". Persisting the selection across launches
+    // would feel wrong — the user almost always wants today, not last week's view.
+    private val selectedWeekOverride = MutableStateFlow(-1)
 
     val state: StateFlow<ProgramUiState> = combine(
         repo.observeCurrentProgram(),
-        selectedWeek,
-    ) { program, selected ->
+        settingsRepo.settings,
+        selectedWeekOverride,
+    ) { program, settings, override ->
+        val current = settings.currentWeek
         ProgramUiState(
             program = program,
-            currentWeek = currentWeek,
-            selectedWeek = selected,
+            currentWeek = current,
+            selectedWeek = if (override > 0) override else current,
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = ProgramUiState.Empty.copy(currentWeek = currentWeek, selectedWeek = currentWeek),
+        initialValue = ProgramUiState.Empty.copy(
+            currentWeek = AppSettings.Defaults.currentWeek,
+            selectedWeek = AppSettings.Defaults.currentWeek,
+        ),
     )
 
     init {
@@ -53,12 +60,12 @@ class ProgramViewModel(
     }
 
     fun selectWeek(week: Int) {
-        selectedWeek.value = week
+        selectedWeekOverride.value = week
     }
 
     companion object {
-        fun factory(repo: LiftingRepository) = viewModelFactory {
-            initializer { ProgramViewModel(repo) }
+        fun factory(repo: LiftingRepository, settingsRepo: SettingsRepository) = viewModelFactory {
+            initializer { ProgramViewModel(repo, settingsRepo) }
         }
     }
 }

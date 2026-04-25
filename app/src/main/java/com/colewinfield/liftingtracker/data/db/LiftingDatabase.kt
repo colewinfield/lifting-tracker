@@ -16,7 +16,11 @@ import androidx.room.TypeConverters
         PerformedSetEntity::class,
         NoteEntity::class,
     ],
-    version = 1,
+    // Bump on any schema-relevant change while we're still using fallbackToDestructiveMigration.
+    // (v1 stored Day.dayOfWeek as a free-form String like "Monday"; v2 stores the Weekday enum
+    // name like "MON", which the v1 rows can't deserialize.) Replace with proper Migration
+    // objects before this app sees real-world data.
+    version = 2,
     // exportSchema = true requires `ksp { arg("room.schemaLocation", ...) }` in build.gradle.kts.
     // Flip on when we start writing real migrations.
     exportSchema = false,
