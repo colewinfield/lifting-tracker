@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xxd)",
+      "Bash(curl -sSL \"https://api.github.com/repos/google/fonts/contents/ofl/robotoflex\")",
+      "Bash(curl -sSL \"https://api.github.com/repos/google/fonts/contents/apache/robotomono\")",
+      "Bash(curl -sSL \"https://api.github.com/repos/google/fonts/contents/ofl/robotomono\")",
+      "Bash(rm -f 'C:/Users/colto/Documents/Software Projects/lifting-tracker/app/src/main/res/font/*.ttf')",
+      "Bash(curl -sSL -o 'C:/Users/colto/Documents/Software Projects/lifting-tracker/app/src/main/res/font/roboto_flex.ttf' https://raw.githubusercontent.com/google/fonts/main/ofl/robotoflex/RobotoFlex%5BGRAD%2CXOPQ%2CXTRA%2CYOPQ%2CYTAS%2CYTDE%2CYTFI%2CYTLC%2CYTUC%2Copsz%2Cslnt%2Cwdth%2Cwght%5D.ttf)",
+      "Bash(curl -sSL -o 'C:/Users/colto/Documents/Software Projects/lifting-tracker/app/src/main/res/font/roboto_mono.ttf' https://raw.githubusercontent.com/google/fonts/main/ofl/robotomono/RobotoMono%5Bwght%5D.ttf)",
+      "Bash(xxd 'C:/Users/colto/Documents/Software Projects/lifting-tracker/app/src/main/res/font/roboto_flex.ttf')",
+      "Bash(./gradlew :app:compileDebugKotlin)",
+      "Bash(JAVA_HOME='/c/Program Files/Android/Android Studio/jbr' ./gradlew :app:compileDebugKotlin)",
+      "Bash(JAVA_HOME='/c/Program Files/Android/Android Studio/jbr' ./gradlew :app:assembleDebug)"
+    ]
+  }
+}
