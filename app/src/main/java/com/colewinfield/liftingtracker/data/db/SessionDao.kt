@@ -70,4 +70,25 @@ interface SessionDao {
 
     @Query("SELECT * FROM performed_sets WHERE sessionId = :sessionId AND liftId = :liftId ORDER BY setIndex")
     suspend fun setsForLiftInSession(sessionId: String, liftId: String): List<PerformedSetEntity>
+
+    // ----- Aggregations for History screen -----
+
+    @Query("SELECT * FROM sessions ORDER BY date DESC")
+    fun observeAllSessions(): Flow<List<SessionEntity>>
+
+    @Query("SELECT * FROM performed_sets")
+    fun observeAllPerformedSets(): Flow<List<PerformedSetEntity>>
+
+    /**
+     * Every session containing at least one performed set for the given lift, newest first.
+     * Drives the Exercise Detail history tab.
+     */
+    @Query("""
+        SELECT s.* FROM sessions s
+        INNER JOIN performed_sets ps ON ps.sessionId = s.id
+        WHERE ps.liftId = :liftId
+        GROUP BY s.id
+        ORDER BY s.date DESC
+    """)
+    suspend fun sessionsWithLift(liftId: String): List<SessionEntity>
 }

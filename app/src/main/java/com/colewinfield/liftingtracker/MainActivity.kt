@@ -13,13 +13,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.colewinfield.liftingtracker.ui.components.LtNavBar
 import com.colewinfield.liftingtracker.ui.components.LtNavItem
 import com.colewinfield.liftingtracker.ui.navigation.LtDestination
+import com.colewinfield.liftingtracker.ui.screens.DetailTab
+import com.colewinfield.liftingtracker.ui.screens.ExerciseDetailScreen
 import com.colewinfield.liftingtracker.ui.screens.HistoryScreen
 import com.colewinfield.liftingtracker.ui.screens.ProgramScreen
 import com.colewinfield.liftingtracker.ui.screens.TodayScreen
@@ -43,6 +47,7 @@ fun LiftingTrackerApp() {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route ?: LtDestination.Today.route
+    val isTopLevel = LtDestination.entries.any { it.route == currentRoute }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -50,21 +55,23 @@ fun LiftingTrackerApp() {
         // applies its own navigationBars inset. Zeroing here prevents double-padding.
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            LtNavBar(
-                items = LtDestination.entries.map {
-                    LtNavItem(id = it.route, label = it.label, icon = it.icon)
-                },
-                activeId = currentRoute,
-                onItemClick = { route ->
-                    navController.navigate(route) {
-                        popUpTo(navController.graph.findStartDestination().id) {
-                            saveState = true
+            if (isTopLevel) {
+                LtNavBar(
+                    items = LtDestination.entries.map {
+                        LtNavItem(id = it.route, label = it.label, icon = it.icon)
+                    },
+                    activeId = currentRoute,
+                    onItemClick = { route ->
+                        navController.navigate(route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
                         }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
-                },
-            )
+                    },
+                )
+            }
         },
     ) { innerPadding ->
         NavHost(
@@ -72,10 +79,34 @@ fun LiftingTrackerApp() {
             startDestination = LtDestination.Today.route,
             modifier = Modifier.padding(innerPadding),
         ) {
-            composable(LtDestination.Today.route)   { TodayScreen() }
+            composable(LtDestination.Today.route) {
+                TodayScreen(
+                    onOpenLiftDetail = { liftId, tab ->
+                        navController.navigate("exercise/$liftId?tab=${DetailTab.toKey(tab)}")
+                    },
+                )
+            }
             composable(LtDestination.Program.route) { ProgramScreen() }
             composable(LtDestination.History.route) { HistoryScreen() }
             composable(LtDestination.You.route)     { YouScreen() }
+            composable(
+                route = "exercise/{liftId}?tab={tab}",
+                arguments = listOf(
+                    navArgument("liftId") { type = NavType.StringType },
+                    navArgument("tab") {
+                        type = NavType.StringType
+                        defaultValue = "history"
+                    },
+                ),
+            ) { entry ->
+                val liftId = entry.arguments?.getString("liftId") ?: return@composable
+                val tabKey = entry.arguments?.getString("tab") ?: "history"
+                ExerciseDetailScreen(
+                    liftId = liftId,
+                    initialTab = DetailTab.fromKey(tabKey),
+                    onBack = { navController.popBackStack() },
+                )
+            }
         }
     }
 }

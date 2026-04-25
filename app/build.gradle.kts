@@ -24,7 +24,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Personal-use signing: the debug keystore is always present at ~/.android/debug.keystore,
+            // so this lets `./gradlew installRelease` work without setting up a real release signing
+            // config. Replace with a proper signing config before any public distribution.
+            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

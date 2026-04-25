@@ -83,7 +83,10 @@ import com.colewinfield.liftingtracker.ui.theme.RobotoMono
 import com.colewinfield.liftingtracker.ui.theme.appColors
 
 @Composable
-fun TodayScreen(modifier: Modifier = Modifier) {
+fun TodayScreen(
+    modifier: Modifier = Modifier,
+    onOpenLiftDetail: (liftId: String, tab: DetailTab) -> Unit = { _, _ -> },
+) {
     val context = LocalContext.current
     val repo = remember(context) { AppContainer.repository(context) }
     val viewModel: TodayViewModel = viewModel(factory = TodayViewModel.factory(repo))
@@ -96,6 +99,7 @@ fun TodayScreen(modifier: Modifier = Modifier) {
         onAdjustWeight = viewModel::adjustWeight,
         onAdjustReps = viewModel::adjustReps,
         onFinishSession = viewModel::finishSession,
+        onOpenLiftDetail = onOpenLiftDetail,
         modifier = modifier,
     )
 }
@@ -110,6 +114,7 @@ private fun TodayContent(
     onAdjustWeight: (Long, Double) -> Unit,
     onAdjustReps: (Long, Int) -> Unit,
     onFinishSession: () -> Unit,
+    onOpenLiftDetail: (liftId: String, tab: DetailTab) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -192,6 +197,8 @@ private fun TodayContent(
                     onToggleSetDone = onToggleSetDone,
                     onAdjustWeight = onAdjustWeight,
                     onAdjustReps = onAdjustReps,
+                    onOpenHistory = { onOpenLiftDetail(lift.id, DetailTab.History) },
+                    onOpenHowTo = { onOpenLiftDetail(lift.id, DetailTab.HowTo) },
                 )
             }
             item {
@@ -352,6 +359,8 @@ private fun LiftCard(
     onToggleSetDone: (Long) -> Unit,
     onAdjustWeight: (Long, Double) -> Unit,
     onAdjustReps: (Long, Int) -> Unit,
+    onOpenHistory: () -> Unit = {},
+    onOpenHowTo: () -> Unit = {},
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -419,6 +428,8 @@ private fun LiftCard(
                 onToggleSetDone = onToggleSetDone,
                 onAdjustWeight = onAdjustWeight,
                 onAdjustReps = onAdjustReps,
+                onOpenHistory = onOpenHistory,
+                onOpenHowTo = onOpenHowTo,
             )
         }
     }
@@ -473,12 +484,14 @@ private fun ExpandedSetEditor(
     onToggleSetDone: (Long) -> Unit,
     onAdjustWeight: (Long, Double) -> Unit,
     onAdjustReps: (Long, Int) -> Unit,
+    onOpenHistory: () -> Unit = {},
+    onOpenHowTo: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (history != null) LastWeekStrip(history)
+        if (history != null) LastWeekStrip(entry = history, onOpenHistory = onOpenHistory)
 
         Row(
             modifier = Modifier.padding(horizontal = 8.dp),
@@ -511,13 +524,13 @@ private fun ExpandedSetEditor(
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             LtChip(selected = false, onClick = { /* TODO */ }, label = "Swap", icon = Icons.Default.SwapHoriz)
             LtChip(selected = false, onClick = { /* TODO */ }, label = "Notes", icon = Icons.AutoMirrored.Filled.StickyNote2)
-            LtChip(selected = false, onClick = { /* TODO */ }, label = "How-to", icon = Icons.Default.PlayArrow)
+            LtChip(selected = false, onClick = onOpenHowTo, label = "How-to", icon = Icons.Default.PlayArrow)
         }
     }
 }
 
 @Composable
-private fun LastWeekStrip(entry: HistoryEntry) {
+private fun LastWeekStrip(entry: HistoryEntry, onOpenHistory: () -> Unit = {}) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -545,7 +558,7 @@ private fun LastWeekStrip(entry: HistoryEntry) {
                 color = MaterialTheme.colorScheme.onSurface,
             )
         }
-        TextButton(onClick = { /* TODO: open exercise detail */ }) {
+        TextButton(onClick = onOpenHistory) {
             Text("HISTORY", style = MaterialTheme.typography.labelMedium)
         }
     }

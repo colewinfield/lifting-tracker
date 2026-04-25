@@ -29,6 +29,9 @@ class LiftingRepository(
     fun observeCurrentProgram(): Flow<Program?> =
         programDao.observeFirstProgram().map { it?.toDomain() }
 
+    fun observeAllSessions() = sessionDao.observeAllSessions()
+    fun observeAllPerformedSets() = sessionDao.observeAllPerformedSets()
+
     fun observeActiveSession(dayId: String, week: Int): Flow<ActiveSessionState> =
         sessionDao.observeSession(dayId, week).flatMapLatest { session ->
             if (session == null) {
@@ -128,6 +131,27 @@ class LiftingRepository(
     ): Map<String, HistoryEntry> = liftIds
         .mapNotNull { id -> lastSessionFor(id, excludeSessionId)?.let { id to it } }
         .toMap()
+
+    suspend fun alternativesFor(liftId: String): List<Alternative> =
+        programDao.alternativesFor(liftId).map { it.toDomain() }
+
+    /**
+     * Full chronological history for one lift, newest first. Each entry carries the session week,
+     * formatted date, and the sets performed (weight × reps). Used by Exercise Detail's history
+     * and graph tabs.
+     */
+    suspend fun historyForLift(liftId: String): List<HistoryEntry> {
+        val sessions = sessionDao.sessionsWithLift(liftId)
+        return sessions.mapNotNull { session ->
+            val sets = sessionDao.setsForLiftInSession(session.id, liftId)
+            if (sets.isEmpty()) null
+            else HistoryEntry(
+                week = session.weekNumber,
+                date = formatHistoryDate(session.date),
+                sets = sets.map { HistorySet(weight = it.weight, reps = it.reps) },
+            )
+        }
+    }
 
     suspend fun ensureSeeded() {
         if (programDao.count() > 0) return

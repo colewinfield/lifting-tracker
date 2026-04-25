@@ -11,7 +11,9 @@
       "Bash(xxd 'C:/Users/colto/Documents/Software Projects/lifting-tracker/app/src/main/res/font/roboto_flex.ttf')",
       "Bash(./gradlew :app:compileDebugKotlin)",
       "Bash(JAVA_HOME='/c/Program Files/Android/Android Studio/jbr' ./gradlew :app:compileDebugKotlin)",
-      "Bash(JAVA_HOME='/c/Program Files/Android/Android Studio/jbr' ./gradlew :app:assembleDebug)"
+      "Bash(JAVA_HOME='/c/Program Files/Android/Android Studio/jbr' ./gradlew :app:assembleDebug)",
+      "Bash(JAVA_HOME='/c/Program Files/Android/Android Studio/jbr' ./gradlew :app:assembleRelease)",
+      "Bash(JAVA_HOME=\"/c/Program Files/Android/Android Studio/jbr\" ./gradlew :app:compileDebugKotlin)"
     ]
   }
 }
