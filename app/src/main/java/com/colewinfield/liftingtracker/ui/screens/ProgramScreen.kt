@@ -71,7 +71,8 @@ import com.colewinfield.liftingtracker.ui.theme.appColors
 fun ProgramScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val repo = remember(context) { AppContainer.repository(context) }
-    val viewModel: ProgramViewModel = viewModel(factory = ProgramViewModel.factory(repo))
+    val settingsRepo = remember(context) { AppContainer.settings(context) }
+    val viewModel: ProgramViewModel = viewModel(factory = ProgramViewModel.factory(repo, settingsRepo))
     val state by viewModel.state.collectAsStateWithLifecycle()
     ProgramContent(
         state = state,
@@ -417,7 +418,7 @@ private fun RestDayCard(day: Day, dayNum: Int) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    text = day.dayOfWeek,
+                    text = day.dayOfWeek.label,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -463,7 +464,7 @@ private fun WorkoutDayCard(day: Day, dayNum: Int, onOpen: () -> Unit) {
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = day.dayOfWeek,
+                        text = day.dayOfWeek.label,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.alignByBaseline(),
@@ -609,8 +610,8 @@ private fun ProgramScreenPreview() {
         ProgramContent(
             state = ProgramUiState(
                 program = SampleData.program,
-                currentWeek = SampleData.current.week,
-                selectedWeek = SampleData.current.week,
+                currentWeek = SampleData.defaultCurrentWeek,
+                selectedWeek = SampleData.defaultCurrentWeek,
             ),
             onSelectWeek = {},
             onOpenDay = {},

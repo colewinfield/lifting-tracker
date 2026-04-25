@@ -89,7 +89,8 @@ fun TodayScreen(
 ) {
     val context = LocalContext.current
     val repo = remember(context) { AppContainer.repository(context) }
-    val viewModel: TodayViewModel = viewModel(factory = TodayViewModel.factory(repo))
+    val settingsRepo = remember(context) { AppContainer.settings(context) }
+    val viewModel: TodayViewModel = viewModel(factory = TodayViewModel.factory(repo, settingsRepo))
     val state by viewModel.state.collectAsStateWithLifecycle()
     TodayContent(
         state = state,
@@ -144,13 +145,17 @@ private fun TodayContent(
     ) { padding ->
         val day = state.day
         val program = state.program
-        if (day == null || program == null) {
+        if (program == null) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
                 contentAlignment = Alignment.Center,
             ) { CircularProgressIndicator() }
+            return@Scaffold
+        }
+        if (day == null) {
+            RestDayState(weekday = state.weekday, padding = padding)
             return@Scaffold
         }
 
@@ -721,6 +726,31 @@ private fun AddSetButton(onClick: () -> Unit) {
     }
 }
 
+@Composable
+private fun RestDayState(weekday: com.colewinfield.liftingtracker.data.Weekday, padding: PaddingValues) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(horizontal = 32.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "Rest day",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "No lift scheduled for ${weekday.label}.",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
 private fun rangeText(range: IntRange): String =
     if (range.first == range.last) "${range.first}" else "${range.first}–${range.last}"
 
@@ -737,6 +767,7 @@ private fun TodayScreenPreview() {
             state = TodayUiState(
                 program = program,
                 day = day,
+                weekday = day.dayOfWeek,
                 weekNumber = 4,
                 isDeload = false,
                 sessionId = "preview",

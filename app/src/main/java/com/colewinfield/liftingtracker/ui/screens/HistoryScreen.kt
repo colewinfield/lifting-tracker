@@ -67,7 +67,8 @@ import kotlin.math.roundToInt
 fun HistoryScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val repo = remember(context) { AppContainer.repository(context) }
-    val viewModel: HistoryViewModel = viewModel(factory = HistoryViewModel.factory(repo))
+    val settingsRepo = remember(context) { AppContainer.settings(context) }
+    val viewModel: HistoryViewModel = viewModel(factory = HistoryViewModel.factory(repo, settingsRepo))
     val state by viewModel.state.collectAsStateWithLifecycle()
     HistoryContent(state = state, modifier = modifier)
 }

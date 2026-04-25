@@ -7,6 +7,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import androidx.room.Relation
 import com.colewinfield.liftingtracker.data.Effort
+import com.colewinfield.liftingtracker.data.Weekday
 
 // IntRange isn't natively persistable, so set/rep ranges live as paired Min/Max columns.
 // Order columns (orderIndex) preserve user-visible ordering in days/lifts.
@@ -34,7 +35,7 @@ data class DayEntity(
     @PrimaryKey val id: String,
     val programId: String,
     val name: String,
-    val dayOfWeek: String,
+    val dayOfWeek: Weekday,
     val focus: String,
     val isRest: Boolean,
     val orderIndex: Int,

@@ -4,17 +4,23 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.colewinfield.liftingtracker.data.ActiveSessionState
+import com.colewinfield.liftingtracker.data.AppSettings
 import com.colewinfield.liftingtracker.data.Day
 import com.colewinfield.liftingtracker.data.HistoryEntry
 import com.colewinfield.liftingtracker.data.LiftingRepository
 import com.colewinfield.liftingtracker.data.PerformedSet
 import com.colewinfield.liftingtracker.data.Program
-import com.colewinfield.liftingtracker.data.SampleData
+import com.colewinfield.liftingtracker.data.SettingsRepository
+import com.colewinfield.liftingtracker.data.Weekday
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -23,6 +29,7 @@ import kotlinx.coroutines.launch
 data class TodayUiState(
     val program: Program?,
     val day: Day?,
+    val weekday: Weekday,
     val weekNumber: Int,
     val isDeload: Boolean,
     val sessionId: String?,
@@ -34,6 +41,7 @@ data class TodayUiState(
         val Empty = TodayUiState(
             program = null,
             day = null,
+            weekday = Weekday.MON,
             weekNumber = 0,
             isDeload = false,
             sessionId = null,
@@ -46,34 +54,54 @@ data class TodayUiState(
 
 private data class UiOnly(val expandedLiftId: String? = null, val userToggled: Boolean = false)
 
+private data class TodaySources(
+    val settings: AppSettings,
+    val program: Program?,
+    val day: Day?,
+    val weekday: Weekday,
+    val ui: UiOnly,
+)
+
 @OptIn(ExperimentalCoroutinesApi::class)
 class TodayViewModel(
     private val repo: LiftingRepository,
+    private val settingsRepo: SettingsRepository,
 ) : ViewModel() {
-
-    // TODO: source from a SettingsDao / DataStore once Profile/Onboarding is wired.
-    private val currentDayId = SampleData.current.dayId
-    private val currentWeek = SampleData.current.week
 
     private val uiOnly = MutableStateFlow(UiOnly())
 
+    private val settingsState: StateFlow<AppSettings> = settingsRepo.settings.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = AppSettings.Defaults,
+    )
+
     val state: StateFlow<TodayUiState> = combine(
+        settingsRepo.settings,
         repo.observeCurrentProgram(),
-        repo.observeActiveSession(currentDayId, currentWeek),
         uiOnly,
-    ) { program, active, ui ->
-        Triple(program, active, ui)
-    }.mapLatest { (program, active, ui) ->
-        val day = program?.days?.firstOrNull { it.id == currentDayId }
-        val lastWeek = if (day != null) {
-            repo.lastSessionsFor(day.lifts.map { it.id }, active.sessionId)
+    ) { settings, program, ui ->
+        val weekday = Weekday.today()
+        val day = program?.days?.firstOrNull { it.dayOfWeek == weekday }
+        TodaySources(settings, program, day, weekday, ui)
+    }.flatMapLatest { src ->
+        if (src.day == null) {
+            flowOf(src to ActiveSessionState(sessionId = null, setsByLift = emptyMap()))
+        } else {
+            repo.observeActiveSession(src.day.id, src.settings.currentWeek)
+                .map { active -> src to active }
+        }
+    }.mapLatest { (src, active) ->
+        val lastWeek = if (src.day != null) {
+            repo.lastSessionsFor(src.day.lifts.map { it.id }, active.sessionId)
         } else emptyMap()
-        val expanded = if (ui.userToggled) ui.expandedLiftId else day?.lifts?.firstOrNull()?.id
+        val expanded = if (src.ui.userToggled) src.ui.expandedLiftId else src.day?.lifts?.firstOrNull()?.id
         TodayUiState(
-            program = program,
-            day = day,
-            weekNumber = currentWeek,
-            isDeload = program?.let { currentWeek == it.deloadWeek } ?: false,
+            program = src.program,
+            day = src.day,
+            weekday = src.weekday,
+            weekNumber = src.settings.currentWeek,
+            isDeload = src.program?.let { src.settings.currentWeek == it.deloadWeek } ?: false,
             sessionId = active.sessionId,
             sets = active.setsByLift,
             lastWeekByLift = lastWeek,
@@ -100,6 +128,7 @@ class TodayViewModel(
 
     fun addSet(liftId: String) {
         viewModelScope.launch {
+            val s = settingsState.value
             val current = state.value
             val day = current.day ?: return@launch
             val lift = day.lifts.firstOrNull { it.id == liftId } ?: return@launch
@@ -110,8 +139,8 @@ class TodayViewModel(
             val weight = historicalSet?.weight ?: 0.0
             val reps = historicalSet?.reps ?: lift.reps.first
             repo.appendSet(
-                dayId = currentDayId,
-                week = currentWeek,
+                dayId = day.id,
+                week = s.currentWeek,
                 liftId = liftId,
                 weight = weight,
                 reps = reps,
@@ -142,8 +171,8 @@ class TodayViewModel(
     }
 
     companion object {
-        fun factory(repo: LiftingRepository) = viewModelFactory {
-            initializer { TodayViewModel(repo) }
+        fun factory(repo: LiftingRepository, settingsRepo: SettingsRepository) = viewModelFactory {
+            initializer { TodayViewModel(repo, settingsRepo) }
         }
     }
 }
