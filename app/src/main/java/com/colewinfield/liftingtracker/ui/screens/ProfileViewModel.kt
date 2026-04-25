@@ -24,6 +24,10 @@ data class ProfileUiState(
     val useDynamicColor: Boolean,
     val currentWeek: Int,
     val cycleLength: Int,
+    val displayName: String,
+    val bodyweight: Double,
+    val heightInches: Int,
+    val age: Int,
 ) {
     companion object {
         val Empty = ProfileUiState(
@@ -35,6 +39,10 @@ data class ProfileUiState(
             useDynamicColor = true,
             currentWeek = AppSettings.Defaults.currentWeek,
             cycleLength = 9,
+            displayName = AppSettings.Defaults.displayName,
+            bodyweight = AppSettings.Defaults.bodyweight,
+            heightInches = AppSettings.Defaults.heightInches,
+            age = AppSettings.Defaults.age,
         )
     }
 }
@@ -58,6 +66,10 @@ class ProfileViewModel(
             useDynamicColor = settings.useDynamicColor,
             currentWeek = settings.currentWeek,
             cycleLength = program?.cycleLength ?: 9,
+            displayName = settings.displayName,
+            bodyweight = settings.bodyweight,
+            heightInches = settings.heightInches,
+            age = settings.age,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -72,15 +84,28 @@ class ProfileViewModel(
         }
     }
 
-    fun setDarkTheme(dark: Boolean) {
-        viewModelScope.launch {
-            settingsRepo.setThemeMode(if (dark) ThemeMode.DARK else ThemeMode.LIGHT)
-        }
+    fun setThemeMode(mode: ThemeMode) {
+        viewModelScope.launch { settingsRepo.setThemeMode(mode) }
+    }
+
+    fun setDynamicColor(enabled: Boolean) {
+        viewModelScope.launch { settingsRepo.setUseDynamicColor(enabled) }
     }
 
     fun setCurrentWeek(week: Int) {
         viewModelScope.launch {
             settingsRepo.setCurrentWeek(week.coerceIn(1, state.value.cycleLength))
+        }
+    }
+
+    fun saveProfile(name: String, bodyweight: Double, heightInches: Int, age: Int) {
+        viewModelScope.launch {
+            settingsRepo.setProfile(
+                displayName = name.trim().ifEmpty { "You" },
+                bodyweight = bodyweight.coerceAtLeast(0.0),
+                heightInches = heightInches.coerceAtLeast(0),
+                age = age.coerceAtLeast(0),
+            )
         }
     }
 

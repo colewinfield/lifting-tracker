@@ -2,7 +2,6 @@ package com.colewinfield.liftingtracker.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,19 +20,27 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,18 +71,12 @@ fun ProfileScreen(modifier: Modifier = Modifier) {
     val viewModel: ProfileViewModel = viewModel(factory = ProfileViewModel.factory(repo, settingsRepo))
     val state by viewModel.state.collectAsStateWithLifecycle()
 
-    val systemDark = isSystemInDarkTheme()
-    val isDarkActive = when (state.themeMode) {
-        ThemeMode.DARK -> true
-        ThemeMode.LIGHT -> false
-        ThemeMode.SYSTEM -> systemDark
-    }
-
     ProfileContent(
         state = state,
-        isDarkActive = isDarkActive,
         onToggleUnit = viewModel::toggleUnit,
-        onSetDarkTheme = viewModel::setDarkTheme,
+        onSetThemeMode = viewModel::setThemeMode,
+        onSetDynamicColor = viewModel::setDynamicColor,
+        onSaveProfile = viewModel::saveProfile,
         modifier = modifier,
     )
 }
@@ -84,11 +85,15 @@ fun ProfileScreen(modifier: Modifier = Modifier) {
 @Composable
 private fun ProfileContent(
     state: ProfileUiState,
-    isDarkActive: Boolean,
     onToggleUnit: () -> Unit,
-    onSetDarkTheme: (Boolean) -> Unit,
+    onSetThemeMode: (ThemeMode) -> Unit,
+    onSetDynamicColor: (Boolean) -> Unit,
+    onSaveProfile: (name: String, bodyweight: Double, heightInches: Int, age: Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var showEditSheet by rememberSaveable { mutableStateOf(false) }
+    val openEdit = { showEditSheet = true }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
@@ -96,8 +101,8 @@ private fun ProfileContent(
                 title = "Profile",
                 variant = LtTopAppBarVariant.Small,
                 actions = {
-                    IconButton(onClick = { /* TODO: settings overflow */ }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    IconButton(onClick = openEdit) {
+                        Icon(Icons.Default.Settings, contentDescription = "Edit profile")
                     }
                 },
             )
@@ -112,29 +117,46 @@ private fun ProfileContent(
                 bottom = padding.calculateBottomPadding() + 80.dp,
             ),
         ) {
-            item { ProfileHeader(state = state) }
-            item { Spacer(Modifier.height(0.dp)) } // grid + label spacing handled inside
-            item { BodyStatsRow() }
+            item { ProfileHeader(state = state, onEdit = openEdit) }
+            item { BodyStatsRow(state = state, onEdit = openEdit) }
             item { Spacer(Modifier.height(16.dp)) }
             item { SettingsSectionLabel() }
             item {
                 SettingsCard(
                     state = state,
-                    isDarkActive = isDarkActive,
                     onToggleUnit = onToggleUnit,
-                    onSetDarkTheme = onSetDarkTheme,
+                    onSetThemeMode = onSetThemeMode,
+                    onSetDynamicColor = onSetDynamicColor,
                 )
             }
         }
     }
+
+    if (showEditSheet) {
+        EditProfileSheet(
+            initialName = state.displayName,
+            initialBodyweight = state.bodyweight,
+            initialHeightInches = state.heightInches,
+            initialAge = state.age,
+            unit = state.unit,
+            onClose = { showEditSheet = false },
+            onSave = { name, bw, h, a ->
+                onSaveProfile(name, bw, h, a)
+                showEditSheet = false
+            },
+        )
+    }
 }
 
 @Composable
-private fun ProfileHeader(state: ProfileUiState) {
+private fun ProfileHeader(state: ProfileUiState, onEdit: () -> Unit) {
+    val initial = state.displayName.trim().firstOrNull()?.uppercaseChar()?.toString() ?: "?"
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(onClick = onEdit)
             .padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 20.dp),
     ) {
         Box(
@@ -145,7 +167,7 @@ private fun ProfileHeader(state: ProfileUiState) {
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "A",
+                text = initial,
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onPrimary,
             )
@@ -153,12 +175,12 @@ private fun ProfileHeader(state: ProfileUiState) {
         Spacer(Modifier.width(16.dp))
         Column {
             Text(
-                text = "Alex",
+                text = state.displayName,
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = "${state.sessionCount} sessions · cycle ${state.cycleNumber}",
+                text = "${state.sessionCount} sessions \u00B7 cycle ${state.cycleNumber}",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -167,26 +189,33 @@ private fun ProfileHeader(state: ProfileUiState) {
 }
 
 @Composable
-private fun BodyStatsRow() {
-    // Hardcoded placeholders matching the JSX. A future user-profile data source replaces these.
-    val stats = listOf(
-        "BW" to "185 lb",
-        "HEIGHT" to "5'11\"",
-        "AGE" to "28",
-    )
+private fun BodyStatsRow(state: ProfileUiState, onEdit: () -> Unit) {
+    val bwDisplay = if (state.bodyweight > 0) {
+        "${formatBodyweight(state.bodyweight)} ${if (state.unit == WeightUnit.LB) "lb" else "kg"}"
+    } else "—"
+    val heightDisplay = if (state.heightInches > 0) {
+        "${state.heightInches / 12}'${state.heightInches % 12}\""
+    } else "—"
+    val ageDisplay = if (state.age > 0) state.age.toString() else "—"
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        stats.forEach { (label, value) ->
-            BodyStatTile(label = label, value = value, modifier = Modifier.weight(1f))
-        }
+        BodyStatTile(label = "BW", value = bwDisplay, modifier = Modifier.weight(1f), onClick = onEdit)
+        BodyStatTile(label = "HEIGHT", value = heightDisplay, modifier = Modifier.weight(1f), onClick = onEdit)
+        BodyStatTile(label = "AGE", value = ageDisplay, modifier = Modifier.weight(1f), onClick = onEdit)
     }
 }
 
 @Composable
-private fun BodyStatTile(label: String, value: String, modifier: Modifier = Modifier) {
-    LtCard(modifier = modifier, variant = LtCardVariant.Filled) {
+private fun BodyStatTile(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+) {
+    LtCard(modifier = modifier, variant = LtCardVariant.Filled, onClick = onClick) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -226,9 +255,9 @@ private fun SettingsSectionLabel() {
 @Composable
 private fun SettingsCard(
     state: ProfileUiState,
-    isDarkActive: Boolean,
     onToggleUnit: () -> Unit,
-    onSetDarkTheme: (Boolean) -> Unit,
+    onSetThemeMode: (ThemeMode) -> Unit,
+    onSetDynamicColor: (Boolean) -> Unit,
 ) {
     LtCard(modifier = Modifier.fillMaxWidth(), variant = LtCardVariant.Filled) {
         Column(modifier = Modifier.padding(4.dp)) {
@@ -250,16 +279,65 @@ private fun SettingsCard(
                 trailingText = if (state.unit == WeightUnit.LB) "Pounds" else "Kilograms",
                 onClick = onToggleUnit,
             )
+            ThemeModeRow(
+                selected = state.themeMode,
+                onSelect = onSetThemeMode,
+            )
             SettingRow(
-                icon = Icons.Default.Settings,
-                label = "Dark theme",
+                icon = Icons.Default.Palette,
+                label = "Material You",
                 control = {
                     Switch(
-                        checked = isDarkActive,
-                        onCheckedChange = onSetDarkTheme,
+                        checked = state.useDynamicColor,
+                        onCheckedChange = onSetDynamicColor,
                     )
                 },
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ThemeModeRow(
+    selected: ThemeMode,
+    onSelect: (ThemeMode) -> Unit,
+) {
+    val options = listOf(
+        ThemeMode.LIGHT to "Light",
+        ThemeMode.SYSTEM to "Auto",
+        ThemeMode.DARK to "Dark",
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.DarkMode,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(14.dp))
+            Text(
+                text = "Theme",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            options.forEachIndexed { index, (mode, label) ->
+                SegmentedButton(
+                    selected = mode == selected,
+                    onClick = { onSelect(mode) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                ) {
+                    Text(label)
+                }
+            }
         }
     }
 }
@@ -317,6 +395,9 @@ private fun SettingRow(
     }
 }
 
+private fun formatBodyweight(w: Double): String =
+    if (w % 1.0 == 0.0) w.toInt().toString() else "%.1f".format(w)
+
 @Preview(showBackground = true, backgroundColor = 0xFF17120E, heightDp = 900)
 @Composable
 private fun ProfileScreenPreview() {
@@ -331,10 +412,15 @@ private fun ProfileScreenPreview() {
                 useDynamicColor = false,
                 currentWeek = 4,
                 cycleLength = 9,
+                displayName = "Cole",
+                bodyweight = 185.0,
+                heightInches = 71,
+                age = 28,
             ),
-            isDarkActive = true,
             onToggleUnit = {},
-            onSetDarkTheme = {},
+            onSetThemeMode = {},
+            onSetDynamicColor = {},
+            onSaveProfile = { _, _, _, _ -> },
         )
     }
 }

@@ -68,6 +68,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.colewinfield.liftingtracker.data.Alternative
 import com.colewinfield.liftingtracker.data.AppContainer
 import com.colewinfield.liftingtracker.data.Effort
 import com.colewinfield.liftingtracker.data.HistoryEntry
@@ -101,6 +102,11 @@ fun TodayScreen(
         onAdjustReps = viewModel::adjustReps,
         onFinishSession = viewModel::finishSession,
         onOpenLiftDetail = onOpenLiftDetail,
+        onOpenSwap = viewModel::openSwapSheet,
+        onOpenNotes = viewModel::openNotesSheet,
+        onCloseSheet = viewModel::closeSheet,
+        onApplySwap = viewModel::applySwap,
+        onSaveNote = viewModel::addNote,
         modifier = modifier,
     )
 }
@@ -116,6 +122,11 @@ private fun TodayContent(
     onAdjustReps: (Long, Int) -> Unit,
     onFinishSession: () -> Unit,
     onOpenLiftDetail: (liftId: String, tab: DetailTab) -> Unit = { _, _ -> },
+    onOpenSwap: (liftId: String) -> Unit = {},
+    onOpenNotes: (liftId: String) -> Unit = {},
+    onCloseSheet: () -> Unit = {},
+    onApplySwap: (liftId: String, alternative: Alternative) -> Unit = { _, _ -> },
+    onSaveNote: (liftId: String, text: String, whoopsy: Boolean) -> Unit = { _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
@@ -196,14 +207,19 @@ private fun TodayContent(
                     index = day.lifts.indexOf(lift) + 1,
                     performed = state.sets[lift.id].orEmpty(),
                     history = state.lastWeekByLift[lift.id],
+                    swappedAlternative = state.swapsByLift[lift.id],
+                    notesCount = state.notesByLift[lift.id]?.size ?: 0,
                     expanded = state.expandedLiftId == lift.id,
                     onToggleExpand = { onToggleExpand(lift.id) },
+                    onOpenDetail = { onOpenLiftDetail(lift.id, DetailTab.History) },
                     onAddSet = { onAddSet(lift.id) },
                     onToggleSetDone = onToggleSetDone,
                     onAdjustWeight = onAdjustWeight,
                     onAdjustReps = onAdjustReps,
                     onOpenHistory = { onOpenLiftDetail(lift.id, DetailTab.History) },
                     onOpenHowTo = { onOpenLiftDetail(lift.id, DetailTab.HowTo) },
+                    onSwap = { onOpenSwap(lift.id) },
+                    onNotes = { onOpenNotes(lift.id) },
                 )
             }
             item {
@@ -218,6 +234,32 @@ private fun TodayContent(
                 ) { Text("Finish session") }
             }
         }
+    }
+
+    when (val sheet = state.activeSheet) {
+        is TodaySheet.Swap -> {
+            val lift = state.day?.lifts?.firstOrNull { it.id == sheet.liftId }
+            if (lift != null) {
+                SwapSheet(
+                    liftName = lift.name,
+                    alternatives = state.alternativesByLift[sheet.liftId].orEmpty(),
+                    onClose = onCloseSheet,
+                    onPick = { alt -> onApplySwap(sheet.liftId, alt) },
+                )
+            }
+        }
+        is TodaySheet.Notes -> {
+            val lift = state.day?.lifts?.firstOrNull { it.id == sheet.liftId }
+            if (lift != null) {
+                NotesSheet(
+                    liftName = lift.name,
+                    notes = state.notesByLift[sheet.liftId].orEmpty(),
+                    onClose = onCloseSheet,
+                    onSave = { text, whoopsy -> onSaveNote(sheet.liftId, text, whoopsy) },
+                )
+            }
+        }
+        null -> Unit
     }
 }
 
@@ -358,14 +400,19 @@ private fun LiftCard(
     index: Int,
     performed: List<PerformedSet>,
     history: HistoryEntry?,
+    swappedAlternative: Alternative?,
+    notesCount: Int,
     expanded: Boolean,
     onToggleExpand: () -> Unit,
     onAddSet: () -> Unit,
     onToggleSetDone: (Long) -> Unit,
     onAdjustWeight: (Long, Double) -> Unit,
     onAdjustReps: (Long, Int) -> Unit,
+    onOpenDetail: () -> Unit = {},
     onOpenHistory: () -> Unit = {},
     onOpenHowTo: () -> Unit = {},
+    onSwap: () -> Unit = {},
+    onNotes: () -> Unit = {},
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -377,13 +424,25 @@ private fun LiftCard(
             NumberedEffortBadge(index = index, effort = lift.effort)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    text = lift.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // Tapping the title row (lift name + SWAP pill) opens Exercise Detail at History.
+                // The outer Row's clickable still toggles expand for taps anywhere else.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable(onClick = onOpenDetail),
+                ) {
+                    Text(
+                        text = swappedAlternative?.name ?: lift.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (swappedAlternative != null) SwapPill()
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -429,14 +488,33 @@ private fun LiftCard(
             ExpandedSetEditor(
                 performed = performed,
                 history = history,
+                notesCount = notesCount,
                 onAddSet = onAddSet,
                 onToggleSetDone = onToggleSetDone,
                 onAdjustWeight = onAdjustWeight,
                 onAdjustReps = onAdjustReps,
                 onOpenHistory = onOpenHistory,
                 onOpenHowTo = onOpenHowTo,
+                onSwap = onSwap,
+                onNotes = onNotes,
             )
         }
+    }
+}
+
+@Composable
+private fun SwapPill() {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(MaterialTheme.colorScheme.tertiaryContainer)
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    ) {
+        Text(
+            text = "SWAP",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+        )
     }
 }
 
@@ -485,12 +563,15 @@ private fun NumberedEffortBadge(index: Int, effort: Effort) {
 private fun ExpandedSetEditor(
     performed: List<PerformedSet>,
     history: HistoryEntry?,
+    notesCount: Int,
     onAddSet: () -> Unit,
     onToggleSetDone: (Long) -> Unit,
     onAdjustWeight: (Long, Double) -> Unit,
     onAdjustReps: (Long, Int) -> Unit,
     onOpenHistory: () -> Unit = {},
     onOpenHowTo: () -> Unit = {},
+    onSwap: () -> Unit = {},
+    onNotes: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
@@ -527,8 +608,13 @@ private fun ExpandedSetEditor(
         AddSetButton(onClick = onAddSet)
 
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            LtChip(selected = false, onClick = { /* TODO */ }, label = "Swap", icon = Icons.Default.SwapHoriz)
-            LtChip(selected = false, onClick = { /* TODO */ }, label = "Notes", icon = Icons.AutoMirrored.Filled.StickyNote2)
+            LtChip(selected = false, onClick = onSwap, label = "Swap", icon = Icons.Default.SwapHoriz)
+            LtChip(
+                selected = false,
+                onClick = onNotes,
+                label = if (notesCount > 0) "Notes \u00B7 $notesCount" else "Notes",
+                icon = Icons.AutoMirrored.Filled.StickyNote2,
+            )
             LtChip(selected = false, onClick = onOpenHowTo, label = "How-to", icon = Icons.Default.PlayArrow)
         }
     }
@@ -782,6 +868,10 @@ private fun TodayScreenPreview() {
                 lastWeekByLift = mapOf(
                     day.lifts.first().id to SampleData.history.getValue(day.lifts.first().id).first(),
                 ),
+                activeSheet = null,
+                swapsByLift = emptyMap(),
+                alternativesByLift = emptyMap(),
+                notesByLift = emptyMap(),
             ),
             onToggleExpand = {},
             onAddSet = {},

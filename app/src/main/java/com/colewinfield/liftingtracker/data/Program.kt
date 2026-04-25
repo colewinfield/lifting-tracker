@@ -86,3 +86,12 @@ data class PerformedSet(
     val done: Boolean = false,
     val whoopsy: Boolean = false,
 )
+
+data class Note(
+    val id: Long,
+    val liftId: String,
+    val sessionId: String?,
+    val date: Long,
+    val text: String,
+    val whoopsy: Boolean,
+)

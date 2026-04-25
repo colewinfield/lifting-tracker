@@ -29,6 +29,7 @@ import androidx.room.TypeConverters
 abstract class LiftingDatabase : RoomDatabase() {
     abstract fun programDao(): ProgramDao
     abstract fun sessionDao(): SessionDao
+    abstract fun noteDao(): NoteDao
 
     companion object {
         const val DB_NAME = "lifting.db"

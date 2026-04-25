@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -25,6 +26,10 @@ class SettingsRepository(private val store: DataStore<Preferences>) {
             useDynamicColor = prefs[Keys.UseDynamicColor] ?: AppSettings.Defaults.useDynamicColor,
             themeMode = prefs[Keys.ThemeMode]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
                 ?: AppSettings.Defaults.themeMode,
+            displayName = prefs[Keys.DisplayName] ?: AppSettings.Defaults.displayName,
+            bodyweight = prefs[Keys.Bodyweight] ?: AppSettings.Defaults.bodyweight,
+            heightInches = prefs[Keys.HeightInches] ?: AppSettings.Defaults.heightInches,
+            age = prefs[Keys.Age] ?: AppSettings.Defaults.age,
         )
     }
 
@@ -33,11 +38,31 @@ class SettingsRepository(private val store: DataStore<Preferences>) {
     suspend fun setUseDynamicColor(enabled: Boolean) = store.edit { it[Keys.UseDynamicColor] = enabled }
     suspend fun setThemeMode(mode: ThemeMode) = store.edit { it[Keys.ThemeMode] = mode.name }
 
+    /**
+     * Atomic write of every profile field — used by the Edit profile sheet so a partial edit
+     * can't observe a half-updated profile snapshot.
+     */
+    suspend fun setProfile(
+        displayName: String,
+        bodyweight: Double,
+        heightInches: Int,
+        age: Int,
+    ) = store.edit { prefs ->
+        prefs[Keys.DisplayName] = displayName
+        prefs[Keys.Bodyweight] = bodyweight
+        prefs[Keys.HeightInches] = heightInches
+        prefs[Keys.Age] = age
+    }
+
     private object Keys {
         val CurrentWeek = intPreferencesKey("current_week")
         val Unit = stringPreferencesKey("unit")
         val UseDynamicColor = booleanPreferencesKey("use_dynamic_color")
         val ThemeMode = stringPreferencesKey("theme_mode")
+        val DisplayName = stringPreferencesKey("display_name")
+        val Bodyweight = doublePreferencesKey("bodyweight")
+        val HeightInches = intPreferencesKey("height_inches")
+        val Age = intPreferencesKey("age")
     }
 
     companion object {

@@ -12,6 +12,14 @@ data class AppSettings(
     val unit: WeightUnit,
     val useDynamicColor: Boolean,
     val themeMode: ThemeMode,
+    // Profile fields. Stored alongside settings — they're effectively single-user prefs and
+    // the DataStore file already rides Auto Backup, so no separate Room table is needed.
+    // Bodyweight is stored as the user typed it (in `unit` at save time); we don't auto-convert
+    // when units change, so a unit toggle doesn't silently rewrite the number.
+    val displayName: String,
+    val bodyweight: Double,
+    val heightInches: Int,
+    val age: Int,
 ) {
     companion object {
         // currentDayId isn't a setting — it's derived at runtime from Weekday.today() against
@@ -21,6 +29,10 @@ data class AppSettings(
             unit = WeightUnit.LB,
             useDynamicColor = true,
             themeMode = ThemeMode.SYSTEM,
+            displayName = "You",
+            bodyweight = 0.0,
+            heightInches = 0,
+            age = 0,
         )
     }
 }

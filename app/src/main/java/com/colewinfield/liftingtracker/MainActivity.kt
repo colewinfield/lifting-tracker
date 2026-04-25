@@ -2,6 +2,7 @@ package com.colewinfield.liftingtracker
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -40,7 +42,6 @@ import com.colewinfield.liftingtracker.ui.theme.LiftingTrackerTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
         setContent {
             val context = LocalContext.current
             val settingsRepo = remember(context) { AppContainer.settings(context) }
@@ -52,6 +53,21 @@ class MainActivity : ComponentActivity() {
                 ThemeMode.LIGHT -> false
                 ThemeMode.DARK -> true
             }
+            // Re-apply edge-to-edge whenever the in-app dark mode changes so the system status
+            // bar / nav bar icons flip contrast with the app, not with the OS setting alone.
+            DisposableEffect(darkTheme) {
+                enableEdgeToEdge(
+                    statusBarStyle = SystemBarStyle.auto(
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT,
+                    ) { darkTheme },
+                    navigationBarStyle = SystemBarStyle.auto(
+                        LightScrim,
+                        DarkScrim,
+                    ) { darkTheme },
+                )
+                onDispose {}
+            }
             LiftingTrackerTheme(
                 darkTheme = darkTheme,
                 dynamicColor = settings.useDynamicColor,
@@ -61,6 +77,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+// Scrims used behind 3-button nav on devices that don't auto-enforce contrast. Gestural-nav
+// devices ignore these and render the bar fully transparent.
+private val LightScrim = android.graphics.Color.argb(0xe6, 0xFF, 0xFF, 0xFF)
+private val DarkScrim = android.graphics.Color.argb(0x80, 0x1b, 0x1b, 0x1b)
 
 @Composable
 fun LiftingTrackerApp() {

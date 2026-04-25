@@ -3,6 +3,7 @@ package com.colewinfield.liftingtracker.data.db
 import com.colewinfield.liftingtracker.data.Alternative
 import com.colewinfield.liftingtracker.data.Day
 import com.colewinfield.liftingtracker.data.Lift
+import com.colewinfield.liftingtracker.data.Note
 import com.colewinfield.liftingtracker.data.PerformedSet
 import com.colewinfield.liftingtracker.data.Program
 
@@ -50,6 +51,15 @@ fun PerformedSetEntity.toDomain(): PerformedSet = PerformedSet(
     weight = weight,
     reps = reps,
     done = done,
+    whoopsy = whoopsy,
+)
+
+fun NoteEntity.toDomain(): Note = Note(
+    id = id,
+    liftId = liftId,
+    sessionId = sessionId,
+    date = date,
+    text = text,
     whoopsy = whoopsy,
 )
 

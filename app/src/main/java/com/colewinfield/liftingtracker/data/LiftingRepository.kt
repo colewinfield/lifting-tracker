@@ -1,5 +1,7 @@
 package com.colewinfield.liftingtracker.data
 
+import com.colewinfield.liftingtracker.data.db.NoteDao
+import com.colewinfield.liftingtracker.data.db.NoteEntity
 import com.colewinfield.liftingtracker.data.db.PerformedSetEntity
 import com.colewinfield.liftingtracker.data.db.ProgramDao
 import com.colewinfield.liftingtracker.data.db.SessionDao
@@ -24,6 +26,7 @@ data class ActiveSessionState(
 class LiftingRepository(
     private val programDao: ProgramDao,
     private val sessionDao: SessionDao,
+    private val noteDao: NoteDao,
 ) {
 
     fun observeCurrentProgram(): Flow<Program?> =
@@ -135,21 +138,64 @@ class LiftingRepository(
     suspend fun alternativesFor(liftId: String): List<Alternative> =
         programDao.alternativesFor(liftId).map { it.toDomain() }
 
+    /** Observe notes for one lift across all sessions, newest first. */
+    fun observeNotesForLift(liftId: String): Flow<List<Note>> =
+        noteDao.observeNotesForLift(liftId).map { rows -> rows.map { it.toDomain() } }
+
+    /** Observe notes grouped by lift id for a batch of lifts (Today screen). */
+    fun observeNotesByLift(liftIds: List<String>): Flow<Map<String, List<Note>>> {
+        if (liftIds.isEmpty()) return flowOf(emptyMap())
+        return noteDao.observeNotesForLifts(liftIds).map { rows ->
+            rows.map { it.toDomain() }.groupBy { it.liftId }
+        }
+    }
+
+    /**
+     * Append a note for a lift. Lazily creates a session row for (dayId, week) if one doesn't
+     * exist yet — matches `appendSet` so notes attach to the active session even before sets
+     * are logged.
+     */
+    suspend fun appendNote(
+        dayId: String,
+        week: Int,
+        liftId: String,
+        text: String,
+        whoopsy: Boolean,
+    ): Long {
+        val session = ensureSession(dayId, week)
+        return noteDao.insertNote(
+            NoteEntity(
+                liftId = liftId,
+                sessionId = session.id,
+                date = System.currentTimeMillis(),
+                text = text,
+                whoopsy = whoopsy,
+            )
+        )
+    }
+
+    suspend fun deleteNote(noteId: Long) = noteDao.deleteNote(noteId)
+
     /**
      * Full chronological history for one lift, newest first. Each entry carries the session week,
-     * formatted date, and the sets performed (weight × reps). Used by Exercise Detail's history
-     * and graph tabs.
+     * formatted date, the sets performed (weight × reps), and any notes attached to the
+     * (session, lift) pair joined by ` · `. Used by Exercise Detail's history and graph tabs.
      */
     suspend fun historyForLift(liftId: String): List<HistoryEntry> {
         val sessions = sessionDao.sessionsWithLift(liftId)
         return sessions.mapNotNull { session ->
             val sets = sessionDao.setsForLiftInSession(session.id, liftId)
             if (sets.isEmpty()) null
-            else HistoryEntry(
-                week = session.weekNumber,
-                date = formatHistoryDate(session.date),
-                sets = sets.map { HistorySet(weight = it.weight, reps = it.reps) },
-            )
+            else {
+                val notes = noteDao.notesForSessionLift(session.id, liftId)
+                    .joinToString(" \u00B7 ") { it.text }
+                HistoryEntry(
+                    week = session.weekNumber,
+                    date = formatHistoryDate(session.date),
+                    sets = sets.map { HistorySet(weight = it.weight, reps = it.reps) },
+                    notes = notes,
+                )
+            }
         }
     }
 
