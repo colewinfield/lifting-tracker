@@ -113,9 +113,13 @@ What would *break* this:
 
 ## Not yet
 
-- **Other screens** — `ProgramScreen`, `HistoryScreen`, `YouScreen` are still single-`Text` placeholders.
-- **Today TODOs** (marked in code): top-bar Menu / Calendar / More handlers; Swap / Notes / How-to chip handlers; HISTORY button → exercise detail; finish-session UX (it persists but no confirmation/dismiss yet).
-- **Settings layer** — current week + dayId are read from `SampleData.current` constants. No DataStore / SettingsDao yet. Touch this when wiring Profile / Onboarding so the Today screen can advance through the cycle.
+- **`YouScreen`** — last placeholder among the 4 main tabs.
+- **Today TODOs** (still in code): top-bar Menu / Calendar / More handlers; **Swap and Notes chip handlers** (How-to + HISTORY are now wired to Exercise Detail); finish-session UX (it persists but no confirmation/dismiss yet).
+- **Settings layer** — current week + dayId still read from `SampleData.current`. The Program screen's `selectedWeek` is in-memory only. No DataStore / SettingsDao yet.
+- **Per-lift HowTo content** — Exercise Detail's HowTo tab uses 4 generic cues. Add a `LiftHowToEntity` (or a `cues: String` column on `LiftEntity`) when content's ready.
+- **Notes in History session cards** — `entry.notes` is rendered if present, but the Seeder drops note strings (no `PerformedSetEntity.notes` field; the `NoteEntity` table is for future user-entered notes). Wire a `NoteDao` when the Notes sheet ships.
+- **Volume / Est. 1RM Graph filter chips** in Exercise Detail are visual stubs — only "Top set" has a series.
+- **TabRow deprecation** — Exercise Detail uses M3's deprecated `TabRow` + `tabIndicatorOffset`. Migrate to `PrimaryTabRow` when convenient (mechanical change, identical visual).
 - **Migrations** — `fallbackToDestructiveMigration(true)` wipes data on schema bump. Write proper `Migration` objects before shipping; the user data this protects is exactly what Auto Backup also protects.
 - **Remaining primitives** from `m3-components.jsx`: `LtFab`, `LtSegmented`, `EffortBar`. Build as screens demand them.
 - **Set logging variants B (numpad)** and **C (quick-tap)** — implement behind a debug flag once A is proven on real workouts.
@@ -129,13 +133,11 @@ What would *break* this:
 
 (Rest Timer is intentionally skipped — see "Cut from scope" above.)
 
-1. **Program screen.** Ship the Ring + WeekStrip + collapsible-day-list combo per `screens/program.jsx`. Read the program from `LiftingRepository.observeCurrentProgram()`. Tapping a week chip should set the active week — needs a settings layer (see step 6).
-2. **Exercise Detail.** 4-tab inner nav (History / Graph / How-to / Alternatives) per `screens/exercise-detail.jsx`. History tab maps `SessionDao` queries against the seeded history; Graph tab needs a thin chart primitive (no chart lib yet).
-3. **Swap + Notes bottom sheets.** Wire from the Today lift card chips. Swap reads `ProgramDao.alternativesFor(liftId)`. Notes need a `NoteDao` (entity exists, DAO does not).
-4. **History tab.** Volume bar chart + grouped session list per `screens/extras.jsx` history artboard.
-5. **Profile / Programs library / Reminders.** Per `screens/extras2.jsx`. Reminders intentionally do NOT include a rest-timer setting — it's the "remind me to lift" notification only.
-6. **Settings persistence layer.** Replaces the hardcoded `SampleData.current` with a real source (DataStore or single-row Room settings). Drives current week + dayId on Today, theme override on Profile, units (lb/kg) everywhere.
-7. **Set logging variants B and C** behind a debug flag.
+1. **Settings persistence layer.** Replaces hardcoded `SampleData.current` with DataStore (or a single-row Room settings entity). Unlocks: Program screen's week selection persisting; Today screen advancing through the cycle; History's "this cycle" filter being meaningful; Profile theme + units (lb/kg). Small foundation, big leverage.
+2. **Swap + Notes bottom sheets.** From Today's lift-card chips. Swap reads `LiftingRepository.alternativesFor(liftId)` (already exists). Notes need a `NoteDao` (the `NoteEntity` table exists, DAO does not). Once the NoteDao is in, surface notes on Exercise Detail's History tab cards too.
+3. **YouScreen / Profile / Programs library / Reminders.** Per `screens/extras2.jsx`. Reminders intentionally do NOT include a rest-timer setting.
+4. **Polish** — migrate `TabRow` → `PrimaryTabRow` in ExerciseDetail; wire Volume / Est. 1RM filter series in Graph tab; add per-lift cue storage so HowTo isn't generic.
+5. **Set logging variants B and C** behind a debug flag.
 
 ## Key decisions — don't re-debate
 
@@ -148,15 +150,23 @@ What would *break* this:
 - **minSdk 24**: variable fonts lose weight axis on 24-25 but render fine.
 - **Schema**: `IntRange` is paired `*Min`/`*Max` columns. Notes lists are `\u001F`-joined strings. Sessions use UUID String IDs (stable across syncs, idempotent inserts). PerformedSets use auto-generated Long IDs (UI passes set IDs through callbacks). Sessions are created lazily on first `appendSet` for a (dayId, week) pair.
 - **No DI framework**. `AppContainer` is a hand-rolled service locator. Compose calls `AppContainer.repository(context)` and passes it to `TodayViewModel.factory(repo)`.
+- **Program ships ring variant** (`weekNavStyle="ring"`) — the canonical demo HTML overrides the JSX default `'strip'`. The Ring includes the Strip below it.
+- **Bottom NavBar visibility**: shown only when `currentRoute` matches a top-level `LtDestination`. Pushed screens (Exercise Detail) handle their own back via `popBackStack()` and absorb the full height.
+- **DetailTab serialization**: `DetailTab.toKey(tab)` / `DetailTab.fromKey(string)` are the single source of truth for nav arg encoding; route is `exercise/{liftId}?tab={key}`.
+- **Charts are hand-rolled Compose Canvas primitives** — no chart library. `LiftLineChart` (HistoryScreen, multi-series) and `ProgressionChart` (ExerciseDetail Graph tab, single-series with area fill + Y-axis labels) are the two existing primitives. Both use `Path` + `Stroke(cap=Round, join=Round)` + `drawCircle` for markers, dashed gridlines via `PathEffect.dashPathEffect`, and a sibling Row for x-axis labels (inset by chart padding so labels align with data points). Reuse / refactor when adding charts elsewhere.
+- **`FlowRowSimple`** (in ExerciseDetailScreen.kt) is the project's flow-layout. M3's `FlowRow` is still experimental — using it would pull in `@OptIn(ExperimentalLayoutApi::class)`. Promote to `ui/components/` if a third caller appears.
 
 ## Key files to read first
 
 - `project/design_handoff_lifting_tracker/README.md` — full design spec.
 - `project/design_handoff_lifting_tracker/design-source/tokens.jsx` — canonical tokens.
 - `project/design_handoff_lifting_tracker/design-source/program-data.jsx` — seed dataset (already mirrored into `data/SampleData.kt`).
-- `project/design_handoff_lifting_tracker/design-source/screens/<screen>.jsx` — visual source of truth for whichever screen you're building. **Match it exactly.**
-- `app/src/main/java/com/colewinfield/liftingtracker/ui/screens/TodayScreen.kt` + `TodayViewModel.kt` — the worked example for the screen + VM + repo pattern.
+- `project/design_handoff_lifting_tracker/design-source/screens/<screen>.jsx` — visual source of truth for whichever screen you're building. **Match it exactly.** When in doubt about which artboard variant ships, grep `Lifting Tracker.html` for how the screen is instantiated (e.g. `weekNavStyle="ring"` overrides the JSX default).
+- `app/src/main/java/com/colewinfield/liftingtracker/ui/screens/TodayScreen.kt` + `TodayViewModel.kt` — the worked example for the screen + VM + repo pattern with mutations.
+- `app/src/main/java/com/colewinfield/liftingtracker/ui/screens/HistoryScreen.kt` + `HistoryViewModel.kt` — worked example for read-only aggregation with hand-rolled Canvas charts.
+- `app/src/main/java/com/colewinfield/liftingtracker/ui/screens/ExerciseDetailScreen.kt` + `ExerciseDetailViewModel.kt` — worked example for tabbed detail with nav-arg-driven initial state.
 - `app/src/main/java/com/colewinfield/liftingtracker/data/` — Room entities, DAOs, repository, mappers, seeder.
+- `app/src/main/java/com/colewinfield/liftingtracker/MainActivity.kt` — NavHost, route table, bottom-nav visibility logic.
 
 ## Auto-memory
 
