@@ -19,7 +19,14 @@
       "Read(//c/Users/colto/**)",
       "Bash(JAVA_HOME=\"/c/Program Files/Android/Android Studio/jbr\" ./gradlew compileDebugKotlin)",
       "Bash(./gradlew.bat compileDebugKotlin)",
-      "Bash(JAVA_HOME=\"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\" ./gradlew.bat compileDebugKotlin)"
+      "Bash(JAVA_HOME=\"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\" ./gradlew.bat compileDebugKotlin)",
+      "Bash(./gradlew :app:compileDebugKotlin --no-daemon -q)",
+      "Bash(./gradlew :app:compileDebugKotlin --no-daemon)",
+      "Bash(curl -sI \"https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json\" -o \"/tmp/exercises_full.json\")",
+      "Read(//tmp/**)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/LICENSE\")",
+      "Bash(curl -s \"https://api.github.com/repos/yuhonas/free-exercise-db\")"
     ]
   }
 }

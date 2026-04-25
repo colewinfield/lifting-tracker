@@ -241,8 +241,8 @@ private fun TodayContent(
             val lift = state.day?.lifts?.firstOrNull { it.id == sheet.liftId }
             if (lift != null) {
                 SwapSheet(
+                    liftId = sheet.liftId,
                     liftName = lift.name,
-                    alternatives = state.alternativesByLift[sheet.liftId].orEmpty(),
                     onClose = onCloseSheet,
                     onPick = { alt -> onApplySwap(sheet.liftId, alt) },
                 )
@@ -870,7 +870,6 @@ private fun TodayScreenPreview() {
                 ),
                 activeSheet = null,
                 swapsByLift = emptyMap(),
-                alternativesByLift = emptyMap(),
                 notesByLift = emptyMap(),
             ),
             onToggleExpand = {},

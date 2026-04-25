@@ -46,7 +46,6 @@ data class TodayUiState(
     // Sheets + per-lift transient state. Swaps are session-scoped (cleared on Finish session).
     val activeSheet: TodaySheet?,
     val swapsByLift: Map<String, Alternative>,
-    val alternativesByLift: Map<String, List<Alternative>>,
     val notesByLift: Map<String, List<Note>>,
 ) {
     companion object {
@@ -62,7 +61,6 @@ data class TodayUiState(
             expandedLiftId = null,
             activeSheet = null,
             swapsByLift = emptyMap(),
-            alternativesByLift = emptyMap(),
             notesByLift = emptyMap(),
         )
     }
@@ -73,7 +71,6 @@ private data class UiOnly(
     val userToggled: Boolean = false,
     val activeSheet: TodaySheet? = null,
     val swapsByLift: Map<String, Alternative> = emptyMap(),
-    val alternativesByLift: Map<String, List<Alternative>> = emptyMap(),
 )
 
 private data class TodaySources(
@@ -132,7 +129,6 @@ class TodayViewModel(
             expandedLiftId = expanded,
             activeSheet = src.ui.activeSheet,
             swapsByLift = src.ui.swapsByLift,
-            alternativesByLift = src.ui.alternativesByLift,
             notesByLift = notesByLift,
         )
     }.stateIn(
@@ -143,16 +139,6 @@ class TodayViewModel(
 
     init {
         viewModelScope.launch { repo.ensureSeeded() }
-        // Eagerly load alternatives once a program is available so the Swap sheet renders
-        // without a loading delay. Re-runs when the program structure changes.
-        viewModelScope.launch {
-            repo.observeCurrentProgram().collect { program ->
-                program ?: return@collect
-                val byLift = program.days.flatMap { it.lifts }
-                    .associate { it.id to repo.alternativesFor(it.id) }
-                uiOnly.update { it.copy(alternativesByLift = byLift) }
-            }
-        }
     }
 
     fun toggleExpand(liftId: String) {

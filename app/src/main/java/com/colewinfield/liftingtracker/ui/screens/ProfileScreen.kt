@@ -64,7 +64,10 @@ import com.colewinfield.liftingtracker.ui.theme.LiftingTrackerTheme
 import com.colewinfield.liftingtracker.ui.theme.RobotoMono
 
 @Composable
-fun ProfileScreen(modifier: Modifier = Modifier) {
+fun ProfileScreen(
+    modifier: Modifier = Modifier,
+    onEditProgram: () -> Unit = {},
+) {
     val context = LocalContext.current
     val repo = remember(context) { AppContainer.repository(context) }
     val settingsRepo = remember(context) { AppContainer.settings(context) }
@@ -77,6 +80,7 @@ fun ProfileScreen(modifier: Modifier = Modifier) {
         onSetThemeMode = viewModel::setThemeMode,
         onSetDynamicColor = viewModel::setDynamicColor,
         onSaveProfile = viewModel::saveProfile,
+        onEditProgram = onEditProgram,
         modifier = modifier,
     )
 }
@@ -89,6 +93,7 @@ private fun ProfileContent(
     onSetThemeMode: (ThemeMode) -> Unit,
     onSetDynamicColor: (Boolean) -> Unit,
     onSaveProfile: (name: String, bodyweight: Double, heightInches: Int, age: Int) -> Unit,
+    onEditProgram: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showEditSheet by rememberSaveable { mutableStateOf(false) }
@@ -127,6 +132,7 @@ private fun ProfileContent(
                     onToggleUnit = onToggleUnit,
                     onSetThemeMode = onSetThemeMode,
                     onSetDynamicColor = onSetDynamicColor,
+                    onEditProgram = onEditProgram,
                 )
             }
         }
@@ -258,6 +264,7 @@ private fun SettingsCard(
     onToggleUnit: () -> Unit,
     onSetThemeMode: (ThemeMode) -> Unit,
     onSetDynamicColor: (Boolean) -> Unit,
+    onEditProgram: () -> Unit,
 ) {
     LtCard(modifier = Modifier.fillMaxWidth(), variant = LtCardVariant.Filled) {
         Column(modifier = Modifier.padding(4.dp)) {
@@ -265,7 +272,7 @@ private fun SettingsCard(
                 icon = Icons.Default.CalendarMonth,
                 label = "Program",
                 trailingText = state.programName,
-                onClick = { /* TODO: open program select */ },
+                onClick = onEditProgram,
             )
             SettingRow(
                 icon = Icons.Default.Notifications,
@@ -421,6 +428,7 @@ private fun ProfileScreenPreview() {
             onSetThemeMode = {},
             onSetDynamicColor = {},
             onSaveProfile = { _, _, _, _ -> },
+            onEditProgram = {},
         )
     }
 }

@@ -1,6 +1,6 @@
 # Session Handoff — Lifting Tracker
 
-Last touched 2026-04-24 (session: Settings persistence + Profile + day-of-week from clock). Personal Android app for a 9-week cyclic hypertrophy lifting program. The full design spec is in `project/design_handoff_lifting_tracker/README.md` — read that first.
+Last touched 2026-04-25 (session: Program/Day/Lift edit screens + free-exercise-db catalog wired into Swap). Personal Android app for a 9-week cyclic hypertrophy lifting program. The full design spec is in `project/design_handoff_lifting_tracker/README.md` — read that first.
 
 > **Visual rule (load-bearing):** When implementing any screen, follow the matching JSX in `project/design_handoff_lifting_tracker/design-source/screens/*.jsx` **exactly**. The HANDOFF / README prose is intent commentary that sometimes diverges from the actual mocks. JSX wins, every time.
 
@@ -125,17 +125,39 @@ Last touched 2026-04-24 (session: Settings persistence + Profile + day-of-week f
 - `Rest timer` row from JSX is **omitted** — see "Cut from scope". `Material You` toggle is also not in the JSX, so not on this screen.
 - `ProfileViewModel.state` = `combine(settings, observeCurrentProgram, observeAllSessions)` → `ProfileUiState(programName, sessionCount, cycleNumber, unit, themeMode, useDynamicColor, currentWeek, cycleLength)`. `sessionCount` filters `finishedAt != null`. `cycleNumber` is hardcoded `1` (no cycle counter yet).
 
-**Auto Backup → Google account (the persistence story)**
+**Edit screens** (this session)
+- `program-edit.jsx` lands as three Compose screens behind Profile → "Program":
+  - `ProgramEditScreen` (`ui/screens/ProgramEditScreen.kt` + `ProgramEditViewModel.kt`) — name (tap-to-edit dialog), cycle-length stepper card, deload mode (`None` / `Week N` / `Custom` with a follow-up week stepper), training-days list (filled card for workout days, dashed-border card for rest days), `Delete program` error button with a confirm dialog.
+  - `DayEditScreen` (`ui/screens/DayEditScreen.kt` + `DayEditViewModel.kt`) — day name (dialog), Mon-Sun chip row (single-select, multi-day-on-same-weekday is allowed; first-by-orderIndex wins per `Weekday.today()` lookup), focus (dialog), rest-day Switch, lifts list with chevron-tap into Lift edit, "Add lift" persists the day first if it's new before navigating, `Delete day` button on edit (hidden for new).
+  - `LiftEditScreen` (`ui/screens/LiftEditScreen.kt` + `LiftEditViewModel.kt`) — exercise identity card (3-field dialog: name / muscle / equipment — placeholder until catalog browser ships, see "Catalog" below), MIN/MAX set stepper grid (auto-clamps so max ≥ min), MIN/MAX rep stepper grid, three-button effort selector (High/Med/Low with descriptions and brand effort colours via `MaterialTheme.appColors`), `Remove from day` error button.
+- `EditDialogs.kt` carries shared text-field dialog primitives (`EditTextFieldDialog`, `EditNameDialog`).
+- New routes in `MainActivity.kt`: `program/edit`, `program/edit/day/{dayId}`, `program/edit/day/{dayId}/lift/{liftId}`. Sentinel string `"new"` (`screens/DayEditViewModel.kt` `NEW_ID`) means create-mode. Bottom NavBar hides automatically on edit routes.
+- New mutations on `ProgramDao`: `update{Program,Day,Lift}`, `insert{Day,Lift}`, `delete{Program,Day,Lift}ById`, single-row reads, `max{Day,Lift}Order` for append-on-create. `LiftingRepository` exposes the matching `add/update/delete{Day,Lift}` + `updateProgramMeta` + `deleteProgram`. After delete, `ensureSeeded()` re-seeds on next launch — by design (the user is the only user, so a wiped program is a "reset to sample" gesture).
 
-This is how the user's lifting data survives an uninstall / new device, in lieu of any cloud DB or login flow:
-- `android:allowBackup="true"` is set in `AndroidManifest.xml` (default true since API 23).
-- `xml/backup_rules.xml` and `xml/data_extraction_rules.xml` use the default include-everything scope, which covers the `database` domain (`/data/data/<pkg>/databases/`) and the `files` domain (so DataStore at `files/datastore/lt_settings.preferences_pb` rides along automatically). No code path or backup/restore handler needed.
-- Android backs both the DB and the DataStore file up to the user's Google account in the background (~24h cadence, when the device is idle / charging / on Wi-Fi). Backups don't count against Drive quota.
-- On reinstall (same device or new), Android restores the DB **before first launch** of the app. The Today screen will come up populated, with no UI flow.
-- Cap: 25 MB per app. Per [LiftingRepository.kt](app/src/main/java/com/colewinfield/liftingtracker/data/LiftingRepository.kt) sizing math (~100 bytes/row × ~180 sets/wk), this is ~10–15 MB after a decade of heavy use, plus indexes — comfortable headroom unless we add media (don't).
-- **Important: this replaces the offline-only / no-cloud commitment from the design README's "personal-use scope" line.** We get backup + restore without going to Firestore / Supabase / Sign-In.
+**Catalog (free-exercise-db wired into Swap)** (this session)
+- `assets/exercises.json` (~208 KB after slimming) is bundled — 873 lifts from [yuhonas/free-exercise-db](https://github.com/yuhonas/free-exercise-db), licensed under The Unlicense (public domain). Slim columns: `id`, `name`, `force`, `level`, `mechanic`, `equipment`, `primaryMuscles`, `secondaryMuscles`, `category`. Instructions and image paths are dropped — we don't render them yet, and re-adding them later just means re-slimming the source.
+- `data/db/CatalogLiftEntity` is a separate read-only table (`catalog_lifts`) with indexes on `primaryMuscle`, `equipment`, `name`. Kept apart from `LiftEntity` so program lifts (which carry user set/rep ranges, ordering, effort, and a Day FK) don't collide with library definitions.
+- `CatalogDao` queries: `byPrimaryMuscle`, `bySecondaryMuscle` (LIKE on the U+001F-joined column), `byEquipment`, `page`, free-text `search`. Caller passes the LIKE pattern explicitly so the SQL stays a fixed string.
+- `data/CatalogSeeder` parses the JSON via `org.json.JSONArray` (no kotlinx.serialization / Gson dependency), normalises muscle names to the free-exercise-db taxonomy (`CatalogSeeder.normalizeMuscle` maps `quads`→`quadriceps`, `core`→`abdominals`, `back`→`lats`, etc.), batch-inserts 200 rows at a time. `LiftingRepository.ensureSeeded()` calls it after the program seed; the catalog seed short-circuits when the table is non-empty.
+- `LiftingRepository` Swap-facing helpers (all return `List<Alternative>` so the existing UI type doesn't change):
+  - `catalogMatchesFor(liftId)` — primary-muscle matches first, with same-equipment rows scored 90% and same-muscle rows 80%; secondary-muscle matches scored 60%. Source lift filtered out by case-insensitive name.
+  - `catalogByEquipmentFor(liftId)` — same-equipment rows, scored 85% if also same-muscle, 50% otherwise.
+  - `searchCatalog(query, sourceLiftId, limit=80)` and `catalogPage(sourceLiftId, offset=0, limit=80)` — score 0% so the Swap UI doesn't render a misleading match badge for free-text browse.
+  - The ergonomic projection lives in `data/db/Mappers.kt`: `CatalogLiftEntity.toAlternative(sourceLiftId, overlapPercent)` plus `displayMuscle` / `displayEquipment` title-case helpers.
+- `SwapSheet` now ViewModel-backed (`ui/screens/SwapSheetViewModel.kt`). It loads curated alts + same-muscle + by-equipment in parallel on open, and runs a debounced (180ms) text search for the Browse-all tab. The sheet's filter chips ("Same muscle" / "Equipment" / "Browse all") drive the active tab. Same muscle tab shows two stacked sections — `RECOMMENDED` (curated `Alternative` rows from the program's `alternatives` table) on top, then `SAME MUSCLE` (catalog matches, deduped by case-insensitive name against the curated list). Browse-all renders an outlined search field above an 800-row LazyColumn. The `OverlapPill` only renders when `overlapPercent > 0`.
+- `TodayViewModel` no longer eagerly preloads `alternativesByLift` — the SwapSheet VM owns that fetch now, so the Today screen launches with one fewer round-trip per program lift. The `alternativesByLift` field on `TodayUiState` was removed; `TodayScreen` invocation passes `liftId` + `liftName` only.
+- `ExerciseDetailScreen` Swap icon now opens the same SwapSheet, but Detail isn't session-bound so picking a swap is browse-only (sheet just closes). A future "apply to today" flow would need cross-screen state.
 
-What would *break* this:
+**Auto Backup → Google account (revised)**
+
+What was claimed last session ("Android Auto Backup gives the user free Drive-backed restore") **is technically configured but not reliable in practice.** The XML rules in `xml/backup_rules.xml` and `xml/data_extraction_rules.xml` are correctly wired (default include-everything inside an empty `<full-backup-content>` and `<cloud-backup>`), and `android:allowBackup="true"` is set, but the actual snapshotting has fragile preconditions:
+- First snapshot waits ~24 hours after install AND requires the device to be idle, charging, AND on Wi-Fi simultaneously.
+- During development (install / use / uninstall in the same day) those conditions almost never align, so no backup ever exists at uninstall time. **Confirmed: user uninstalled, reinstalled, and lost everything — the snapshot was never taken.**
+- Even when it works, latency is up to 24 h. Auto Backup is "eventually consistent at best", not a real save-point.
+
+The personal-use commitment to "no cloud DB / no Sign-In" still holds for *every* part of the app except this one. For a *reliable* save-point the next session should add explicit Google Sign-In + Drive AppData sync. See "Drive AppData sync" under "Suggested next steps".
+
+What would *break* the Auto-Backup fallback (still worth not breaking, even if we add explicit sync):
 - Setting `allowBackup="false"` in the manifest — don't.
 - `<exclude domain="database" .../>` or `<exclude domain="file" .../>` in `backup_rules.xml` — don't.
 - Storing the DB outside `/data/data/<pkg>/databases/` (e.g. external storage) — don't.
@@ -151,7 +173,7 @@ What would *break* this:
 
 **Profile screen gaps** (code is in place, just incomplete)
 - Avatar initial, name "Alex", and BW / HEIGHT / AGE values are **hardcoded placeholders from the JSX**. There's no user-profile data source yet. Add one (DataStore or a single-row Room `user_profile` table) before any of these become real.
-- `Program` and `Reminders` setting rows are no-ops on tap. Program row should open the `Programs` library screen (`screens/extras2.jsx` `ProgramSelectScreen`) once that lands; Reminders should open a reminders-config sheet.
+- `Program` row now navigates to `ProgramEditScreen` (the JSX shows it via `ProgramSelectScreen` → "Edit", but until the library screen lands we wire Profile straight to ProgramEdit). `Reminders` row is still a no-op on tap; should open a reminders-config sheet once Reminders ships.
 - `Units` row toggles LB↔KG on tap with no picker affordance. Functional, but if you'd rather have a proper picker (or segmented control), add a small sheet.
 - `Dark theme` switch is **binary only** — once flipped, you can't get back to `ThemeMode.SYSTEM` from the UI. The persistence layer supports it; the JSX doesn't show that affordance, so no UI yet. Easy add when you decide on the control (segmented Light/Auto/Dark would be the M3 pattern).
 - `Material You` toggle — not in the JSX. Persisted state exists (`useDynamicColor`); just not surfaced. If you decide to expose it, add a row consistent with the others.
@@ -164,13 +186,10 @@ What would *break* this:
 - `LiftingDatabase` uses `fallbackToDestructiveMigration(dropAllTables = true)`. Schema bumps still wipe the DB. Write proper `Migration(n, n+1)` objects before any production-style milestone — Auto Backup snapshots can save the previous version on uninstall/reinstall, but a routine app update with a destructive migration nukes the user's data in place.
 
 **Other screens still placeholder or missing**
-- **Swap sheet** — open from Today's lift card. Reads `ProgramDao.alternativesFor(liftId)`. Needs a session-scoped "swap until end of session" hook in the repo.
-- **Notes sheet** — open from Today's lift card. NoteEntity is defined; no `NoteDao` yet. Once the DAO lands, also backfill the History tab session cards' notes display (currently empty in detail history).
-- **Programs library** (`screens/extras2.jsx` `ProgramSelectScreen`).
+- **Programs library** (`screens/extras2.jsx` `ProgramSelectScreen`) — Profile → "Program" jumps straight into ProgramEdit today; the library screen would slot between as Profile → ProgramSelect → ProgramEdit.
 - **Onboarding** (`screens/extras2.jsx` `OnboardingScreen`).
-- **Exercise DB browser** (`screens/extras2.jsx` `ExerciseDBScreen`).
+- **Exercise DB browser** (`screens/extras2.jsx` `ExerciseDBScreen`) — data layer (`CatalogDao` + `assets/exercises.json`) is in. What's missing is a standalone screen that lets the user search and tap into a lift's profile (or back-fill into Lift Edit's identity card). See "Suggested next steps" #2.
 - **Reminders** screen + actual notification scheduling. Reminders intentionally do NOT include a rest-timer setting — it's the "remind me to lift" notification only.
-- **Program Edit** (`screens/program-edit.jsx`).
 
 **Exercise Detail polish**
 - HOW-TO tab cues are generic placeholders. Add per-lift cue/notes content once the lift schema grows (e.g., `cues: List<String>` on `LiftEntity` + a TextConverter).
@@ -185,14 +204,44 @@ What would *break* this:
 
 ## Suggested next steps (in order)
 
-1. **User-profile data layer.** Replace the hardcoded `Alex` / 185 lb / 5'11" / 28 in [ProfileScreen.kt](app/src/main/java/com/colewinfield/liftingtracker/ui/screens/ProfileScreen.kt) with a real source. DataStore key/value is plenty (no Room table needed — single user). Plumb through `ProfileViewModel`. While you're there, an "Edit profile" sheet (or in-place editable rows) is reasonable scope.
-2. **Swap + Notes bottom sheets** off the Today lift-card chips. Swap reads `ProgramDao.alternativesFor(liftId)` (already exposed). Notes need a `NoteDao` (entity exists, DAO does not). Once `NoteDao` lands, also wire Notes display into Exercise Detail's HISTORY tab session cards (currently the `entry.notes` row is empty for real DB-backed history).
-3. **Programs library + Onboarding + Exercise DB browser** per `screens/extras2.jsx`. Programs library is the destination for Profile's "Program" row; Onboarding is first-run only (gated on a `hasOnboarded: Boolean` setting); Exercise DB is reachable from Swap or a future "Add lift" affordance.
-4. **Reminders.** Reminders setting row + actual notification scheduling via `WorkManager`. Intentional omission: no rest-timer setting.
-5. **Program edit** (`screens/program-edit.jsx`) — last screen in the design pack.
+1. **Drive AppData sync** — the next persistence work, since Auto Backup proved unreliable. **Stub follows in its own section below.**
+2. **Lift-edit exercise picker → catalog browser.** The 3-field `ExerciseIdentityDialog` in `LiftEditScreen` is a placeholder: it lets the user type name / muscle / equipment by hand. Replace it with a navigation push to a new `ExerciseDBScreen` (matches `extras2.jsx`'s `ExerciseDBScreen` — search field at top, muscle filter chips, list of `CatalogLiftEntity` rows). Picking a row should populate `viewModel.setIdentity(name, muscle, equipment)` and pop back. Existing data layer (`CatalogDao.search` / `byPrimaryMuscle` / `page`) covers everything you need.
+3. **Drag-to-reorder days and lifts.** The JSX shows drag handles on `ProgramEditDayRow` / `DayEditLiftRow`. Not implemented — current behaviour is that order is whatever `orderIndex` says (set at insert). Reordering needs either Compose's `reorderable` library or a hand-rolled long-press-and-drag with a swap-orderIndex repo helper. Off the critical path for a personal app; flag if it stops mattering.
+4. **Programs library + Onboarding** per `screens/extras2.jsx`. Programs library can replace the direct Profile→ProgramEdit route (Profile→ProgramSelect→Edit). Onboarding is first-run only (gate on a new `hasOnboarded: Boolean` setting).
+5. **Reminders.** Reminders setting row + actual notification scheduling via `WorkManager`. Intentional omission: no rest-timer setting.
 6. **Auto-advance week** + cycle counter. Drive both from a `cycleStartedAt: Long` setting. Cycle increments when `currentWeek` rolls past `cycleLength`.
-7. **Migrations** before any "real" build. Pair every schema change with a `Migration(n, n+1)`.
+7. **Migrations** before any "real" build. Pair every schema change with a `Migration(n, n+1)`. The catalog table at v3 is the most recent destructive bump.
 8. **Set logging variants B and C** behind a debug flag.
+
+## Next: Drive AppData sync (stub for the next session)
+
+**Why this is the work, not Auto Backup.** Auto Backup is technically wired (manifest + XML rules) but the user already confirmed an uninstall lost their data — the ~24h-idle-charging-Wi-Fi precondition for the first snapshot is too fragile. We need an explicit, user-controllable backup that they can *see* worked. The right tool is the Google **Drive REST API with the `drive.appdata` scope** + Sign-In via Credential Manager. Quote-unquote "Drive" because the AppData folder is invisible to the user, doesn't count against their Drive quota, and only this app can read/write its contents. No general-purpose Drive permissions, no scary consent screens.
+
+**Scope (one session of work, maybe two):**
+1. **Add Sign-In.** Use Credential Manager (`androidx.credentials`) instead of the deprecated GoogleSignInClient — it's the new canonical path. The user picks a Google account once via the Credential Manager bottom sheet; we get an ID token + GoogleIdTokenCredential. Persist the account email in DataStore (`AppSettings.googleAccountEmail`) so we can show "Backing up to alex@gmail.com" in Profile.
+2. **Acquire an OAuth access token for Drive AppData.** Add `play-services-auth` and use `GoogleAuthUtil.getToken(context, account, "oauth2:https://www.googleapis.com/auth/drive.appdata")`. Refresh on 401. Wrap in a small `DriveBackupService` class.
+3. **Snapshot format.** Single JSON blob: `{schemaVersion: 3, exportedAt: <epochMillis>, settings: AppSettings, program: ProgramWithStructure, sessions: [...], performedSets: [...], notes: [...]}`. Use `org.json` (already a dependency via Catalog seeder) — same reason as the catalog parse: avoids a serialization framework just for one use case. Cap size at ~5 MB (well under Drive AppData's per-file limit). Filename: `lifting-tracker-snapshot.json` (single file, overwritten each backup).
+4. **Drive REST calls** (no SDK; just OkHttp + the bearer token):
+   - List: `GET https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=files(id,modifiedTime,size)` — returns the existing snapshot if any.
+   - Upload: `POST https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&spaces=appDataFolder` (or `PATCH .../files/{id}` for overwrite).
+   - Download: `GET .../files/{id}?alt=media`.
+5. **UI.** Profile's "Settings" card gains a `Backup` row showing last-backup timestamp + a "Back up now" button + a "Restore from backup" button (with a confirm dialog because restore replaces local data). Last-backup time is persisted in DataStore. On first launch after a fresh install, if a snapshot exists in Drive AppData, prompt "Restore your data?" before letting the user start lifting (one-shot prompt gated on a `hasCheckedForBackupRestore` setting).
+6. **Auto-trigger.** Once manual backup works, schedule a periodic `WorkManager` job (constraints: connected, charging-or-not depending on user pref) that runs `DriveBackupService.backupNow()`. Skip if the snapshot hasn't changed since last upload (compare a SHA-256 of the JSON).
+7. **Settings additions** (`AppSettings`): `googleAccountEmail: String?`, `googleAccountId: String?`, `lastBackupAt: Long`, `lastBackupSha: String`, `hasCheckedForBackupRestore: Boolean`.
+
+**Things to know going in:**
+- AppData scope still requires a Cloud Console OAuth client + a SHA-1 fingerprint of the signing key in `google-services.json`. Set this up before writing code; without it `getToken` will fail with `UserRecoverableAuthException`.
+- Credential Manager works on API 24+ via the AndroidX wrapper, but the actual Google Sign-In bottom sheet path needs Play Services. That's fine for our minSdk 24 since AOSP-without-Play is out of scope for a personal app.
+- Restore must run *before* the Compose nav graph composes Today, otherwise you'll race the Room seeder. Stick the check in `MainActivity.onCreate` before `setContent`, blocking on a brief progress UI.
+- This *replaces* Auto Backup as the persistence story — but don't disable Auto Backup. It's a free-tier safety net for the case where Sign-In fails or the user denies the permission. Leave the manifest flags alone.
+
+**Files that will change:**
+- `data/Settings.kt` + `SettingsRepository.kt` — new persisted fields.
+- `data/DriveBackupService.kt` (new) — Sign-In, token, snapshot, upload/download.
+- `data/AppContainer.kt` — provide the service.
+- `ui/screens/ProfileScreen.kt` — Backup section in the Settings card.
+- `MainActivity.kt` — first-launch restore check.
+- `app/build.gradle.kts` + `gradle/libs.versions.toml` — `androidx.credentials:credentials`, `androidx.credentials:credentials-play-services-auth`, `com.google.android.libraries.identity.googleid:googleid`, `com.squareup.okhttp3:okhttp`.
 
 ## Key decisions — don't re-debate
 
@@ -201,7 +250,10 @@ What would *break* this:
 - **Semantic colors** (effort/deload/rest/chart) are NOT dynamic — fixed per theme. Access via `MaterialTheme.appColors.effortHigh` (CompositionLocal pattern).
 - **Naming**: `Lt*` prefix for primitives/wrappers to avoid clashing with `androidx.compose.material3.*`.
 - **Preview convention**: force `dynamicColor = false` in every `@Preview` so AS shows the brand scheme. Previews stay; the user "ignores" them — don't strip.
-- **Personal-use scope, with backup**: still offline-only / no accounts / no sync. Data persists via Room + Android Auto Backup (DB + DataStore restored on reinstall via the user's Google account, no UI flow, no Sign-In, no Drive quota cost). See "Auto Backup → Google account" section above.
+- **Personal-use scope, with reliable backup as a known gap**: app is offline-only / no Sign-In *today*, but Auto Backup turned out unreliable in real testing (see revised "Auto Backup" section). Drive AppData sync is the next persistence work — see "Next: Drive AppData sync" section. The cloud commitment is bounded: AppData scope only, no general-Drive permissions, no Firestore / Supabase, no analytics.
+- **Catalog data source**: free-exercise-db (yuhonas/free-exercise-db, Unlicense). Slim JSON shipped at `assets/exercises.json`, parsed into the `catalog_lifts` table on first launch via `CatalogSeeder` (uses `org.json` — no kotlinx.serialization). Don't bundle the upstream's `images[]` or `instructions[]` until we actually render them; the seeder relies on the slimmed shape.
+- **Catalog vs program lifts**: separate tables. `LiftEntity` rows are user-customised program lifts attached to a Day; `CatalogLiftEntity` rows are read-only library definitions. Swap maps catalog rows into the existing `Alternative` domain type via `CatalogLiftEntity.toAlternative` so the Sheet UI takes one list type. Curated `AlternativeEntity` rows still live in their own table and render as the `RECOMMENDED` section above the catalog matches.
+- **Muscle name normalization**: free-exercise-db uses lowercase like `quadriceps` / `abdominals`; legacy `LiftEntity.muscle` uses `Quads` / `Core`. `CatalogSeeder.normalizeMuscle` is the source of truth — both sides are normalised before matching. Display uses `Mappers.displayMuscle` (title-case).
 - **minSdk 24**: variable fonts lose weight axis on 24-25 but render fine. `Weekday.today()` uses `java.util.Calendar` instead of `java.time.DayOfWeek` to avoid needing core library desugaring.
 - **Lift schedule**: 5 lift days (Wed / Thu / Sat / Sun / Mon). Tuesday + Friday are *not* entries in `program.days` — they're calendar gaps. `Today screen` shows a rest-day empty state on those days. Source of truth: `Day.dayOfWeek: Weekday`.
 - **`currentDayId` is derived, not persisted.** Settings only persists `currentWeek`, `unit`, `useDynamicColor`, `themeMode`. The active day is `program.days.firstOrNull { it.dayOfWeek == Weekday.today() }` — recomputed on every state emission. If this turns out wrong, the fix is to add `currentDayId` back to `AppSettings` + a setter in `SettingsRepository`.
@@ -221,7 +273,10 @@ What would *break* this:
 - `app/src/main/java/com/colewinfield/liftingtracker/ui/screens/TodayViewModel.kt` — the worked example for combining settings + program + a derived "today's day" + active session.
 - `app/src/main/java/com/colewinfield/liftingtracker/ui/screens/ProfileScreen.kt` + `ProfileViewModel.kt` — the worked example for a simple settings-bound screen + how the dark-theme Switch resolves SYSTEM via `isSystemInDarkTheme()`.
 - `app/src/main/java/com/colewinfield/liftingtracker/ui/screens/HistoryScreen.kt` + `ExerciseDetailScreen.kt` — worked examples for hand-rolled Canvas charts.
-- `app/src/main/java/com/colewinfield/liftingtracker/data/` — Room entities, DAOs, repository, mappers, seeder.
+- `app/src/main/java/com/colewinfield/liftingtracker/ui/screens/ProgramEditScreen.kt` / `DayEditScreen.kt` / `LiftEditScreen.kt` (+ matching `*ViewModel.kt`s) — worked examples for an in-memory edit-buffer pattern over Room (load-once, mutate buffer, save commits).
+- `app/src/main/java/com/colewinfield/liftingtracker/ui/screens/SwapSheetViewModel.kt` + `SwapSheet.kt` — worked example for a sheet-scoped VM that loads multiple parallel queries and runs a debounced text search.
+- `app/src/main/java/com/colewinfield/liftingtracker/data/CatalogSeeder.kt` + `db/CatalogDao.kt` — the asset-backed seed pattern (`org.json` parse, batch insert, idempotent re-run check).
+- `app/src/main/java/com/colewinfield/liftingtracker/data/` — Room entities, DAOs, repository, mappers, seeders.
 
 ## Auto-memory
 

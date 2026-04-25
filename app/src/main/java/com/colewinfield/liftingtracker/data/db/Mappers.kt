@@ -105,3 +105,34 @@ fun Alternative.toEntity(): AlternativeEntity = AlternativeEntity(
     equipment = equipment,
     overlapPercent = overlapPercent,
 )
+
+// ----- Catalog -----
+
+/**
+ * Project a catalog row into the existing [Alternative] domain type so the SwapSheet UI can
+ * render curated alternatives and library matches in one list. The catalog row's slug becomes
+ * the synthetic Alternative id (no DB row in `alternatives` is created).
+ */
+fun CatalogLiftEntity.toAlternative(sourceLiftId: String, overlapPercent: Int): Alternative =
+    Alternative(
+        liftId = sourceLiftId,
+        id = id,
+        name = name,
+        muscle = displayMuscle(primaryMuscle),
+        equipment = displayEquipment(equipment),
+        overlapPercent = overlapPercent,
+    )
+
+/** Title-case a normalised muscle token for display. "lats" -> "Lats", "" -> "—". */
+fun displayMuscle(normalized: String): String = when {
+    normalized.isBlank() -> "\u2014"
+    else -> normalized.split(' ').joinToString(" ") {
+        it.replaceFirstChar { ch -> ch.titlecase() }
+    }
+}
+
+/** Title-case equipment for display. "body only" -> "Body only", "" -> "—". */
+fun displayEquipment(normalized: String): String = when {
+    normalized.isBlank() -> "\u2014"
+    else -> normalized.replaceFirstChar { it.titlecase() }
+}

@@ -1,17 +1,23 @@
 package com.colewinfield.liftingtracker.data
 
+import com.colewinfield.liftingtracker.data.db.CatalogDao
+import com.colewinfield.liftingtracker.data.db.CatalogLiftEntity
+import com.colewinfield.liftingtracker.data.db.DayEntity
+import com.colewinfield.liftingtracker.data.db.LiftEntity
 import com.colewinfield.liftingtracker.data.db.NoteDao
 import com.colewinfield.liftingtracker.data.db.NoteEntity
 import com.colewinfield.liftingtracker.data.db.PerformedSetEntity
 import com.colewinfield.liftingtracker.data.db.ProgramDao
 import com.colewinfield.liftingtracker.data.db.SessionDao
 import com.colewinfield.liftingtracker.data.db.SessionEntity
+import com.colewinfield.liftingtracker.data.db.toAlternative
 import com.colewinfield.liftingtracker.data.db.toDomain
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -27,6 +33,8 @@ class LiftingRepository(
     private val programDao: ProgramDao,
     private val sessionDao: SessionDao,
     private val noteDao: NoteDao,
+    private val catalogDao: CatalogDao,
+    private val assetReader: (String) -> InputStream,
 ) {
 
     fun observeCurrentProgram(): Flow<Program?> =
@@ -200,9 +208,255 @@ class LiftingRepository(
     }
 
     suspend fun ensureSeeded() {
-        if (programDao.count() > 0) return
-        Seeder.seed(programDao, sessionDao)
+        if (programDao.count() == 0) Seeder.seed(programDao, sessionDao)
+        // Catalog seeding is independent — it's a read-only library, not user data.
+        // CatalogSeeder.seed() short-circuits if the table is already populated.
+        CatalogSeeder.seed(catalogDao, assetReader)
     }
+
+    // ----- Catalog (free-exercise-db) -----
+
+    /**
+     * Same-muscle catalog matches for a program lift, ranked by relevance:
+     * - Catalog rows whose `primaryMuscle` matches the lift's normalised muscle, with same
+     *   equipment first (overlap 90%) then any equipment (overlap 80%).
+     * - Catalog rows where the lift's muscle appears in `secondaryMuscles` (overlap 60%).
+     * The source lift itself (case-insensitive name match) is filtered out.
+     */
+    suspend fun catalogMatchesFor(liftId: String): List<Alternative> {
+        val lift = programDao.getLift(liftId) ?: return emptyList()
+        return rankByMuscle(
+            sourceMuscle = lift.muscle,
+            sourceEquipment = lift.equipment,
+            sourceLiftId = liftId,
+            sourceName = lift.name,
+        )
+    }
+
+    /** Same as [catalogMatchesFor] but driven from a free-form (muscle, equipment) pair. */
+    suspend fun catalogMatchesByMuscle(
+        sourceLiftId: String,
+        sourceName: String,
+        muscle: String,
+        equipment: String,
+    ): List<Alternative> = rankByMuscle(
+        sourceMuscle = muscle,
+        sourceEquipment = equipment,
+        sourceLiftId = sourceLiftId,
+        sourceName = sourceName,
+    )
+
+    private suspend fun rankByMuscle(
+        sourceMuscle: String,
+        sourceEquipment: String,
+        sourceLiftId: String,
+        sourceName: String,
+    ): List<Alternative> {
+        val muscle = CatalogSeeder.normalizeMuscle(sourceMuscle)
+        if (muscle.isBlank()) return emptyList()
+        val equip = sourceEquipment.lowercase().trim()
+        val sameSource: (CatalogLiftEntity) -> Boolean = { row ->
+            row.name.equals(sourceName, ignoreCase = true)
+        }
+        val primary = catalogDao.byPrimaryMuscle(muscle).filterNot(sameSource)
+        val secondary = catalogDao
+            .bySecondaryMuscle(muscle = muscle, likeQuery = "%$muscle%")
+            .filterNot(sameSource)
+
+        val primaryAlts = primary.map { row ->
+            val equipMatch = row.equipment.equals(equip, ignoreCase = true) && equip.isNotBlank()
+            row.toAlternative(
+                sourceLiftId = sourceLiftId,
+                overlapPercent = if (equipMatch) 90 else 80,
+            )
+        }
+        val secondaryAlts = secondary.map { row ->
+            row.toAlternative(sourceLiftId = sourceLiftId, overlapPercent = 60)
+        }
+        return (primaryAlts + secondaryAlts).sortedByDescending { it.overlapPercent }
+    }
+
+    /** Catalog lifts that share the program lift's equipment (any muscle). Source lift removed. */
+    suspend fun catalogByEquipmentFor(liftId: String): List<Alternative> {
+        val lift = programDao.getLift(liftId) ?: return emptyList()
+        val equip = lift.equipment.lowercase().trim()
+        if (equip.isBlank()) return emptyList()
+        return catalogDao.byEquipment(equip)
+            .filterNot { it.name.equals(lift.name, ignoreCase = true) }
+            .map { row ->
+                val sameMuscle = row.primaryMuscle == CatalogSeeder.normalizeMuscle(lift.muscle)
+                row.toAlternative(
+                    sourceLiftId = liftId,
+                    overlapPercent = if (sameMuscle) 85 else 50,
+                )
+            }
+            .sortedByDescending { it.overlapPercent }
+    }
+
+    /**
+     * Free-text catalog search. Pass a non-blank query (matched as `%query%` against name and
+     * primary muscle). Returns at most [limit] rows. Results carry a 0% overlap so the Swap UI
+     * doesn't render a misleading match badge.
+     */
+    suspend fun searchCatalog(
+        query: String,
+        sourceLiftId: String,
+        limit: Int = 80,
+    ): List<Alternative> {
+        val q = query.trim()
+        if (q.isBlank()) return emptyList()
+        val pattern = "%$q%"
+        return catalogDao.search(pattern, limit).map { row ->
+            row.toAlternative(sourceLiftId = sourceLiftId, overlapPercent = 0)
+        }
+    }
+
+    /** First page of the catalog when the user opens "Browse all" with no search query. */
+    suspend fun catalogPage(
+        sourceLiftId: String,
+        offset: Int = 0,
+        limit: Int = 80,
+    ): List<Alternative> = catalogDao.page(offset, limit).map { row ->
+        row.toAlternative(sourceLiftId = sourceLiftId, overlapPercent = 0)
+    }
+
+    // ----- Program / Day / Lift edits -----
+
+    suspend fun getDay(dayId: String): Day? =
+        programDao.getDay(dayId)?.let { entity ->
+            Day(
+                id = entity.id,
+                name = entity.name,
+                dayOfWeek = entity.dayOfWeek,
+                focus = entity.focus,
+                isRest = entity.isRest,
+                lifts = emptyList(),
+            )
+        }
+
+    suspend fun getLift(liftId: String): Lift? =
+        programDao.getLift(liftId)?.toDomain()
+
+    suspend fun updateProgramMeta(
+        programId: String,
+        name: String,
+        cycleLength: Int,
+        deloadWeek: Int,
+    ) {
+        val current = programDao.getProgram(programId) ?: return
+        programDao.updateProgram(
+            current.copy(
+                name = name,
+                cycleLength = cycleLength,
+                deloadWeek = deloadWeek,
+            )
+        )
+    }
+
+    suspend fun deleteProgram(programId: String) =
+        programDao.deleteProgramById(programId)
+
+    suspend fun addDay(
+        programId: String,
+        name: String,
+        dayOfWeek: Weekday,
+        focus: String,
+        isRest: Boolean,
+    ): String {
+        val newId = UUID.randomUUID().toString()
+        val nextOrder = (programDao.maxDayOrder(programId) ?: -1) + 1
+        programDao.insertDay(
+            DayEntity(
+                id = newId,
+                programId = programId,
+                name = name,
+                dayOfWeek = dayOfWeek,
+                focus = focus,
+                isRest = isRest,
+                orderIndex = nextOrder,
+            )
+        )
+        return newId
+    }
+
+    suspend fun updateDay(
+        dayId: String,
+        name: String,
+        dayOfWeek: Weekday,
+        focus: String,
+        isRest: Boolean,
+    ) {
+        val current = programDao.getDay(dayId) ?: return
+        programDao.updateDay(
+            current.copy(
+                name = name,
+                dayOfWeek = dayOfWeek,
+                focus = focus,
+                isRest = isRest,
+            )
+        )
+    }
+
+    suspend fun deleteDay(dayId: String) = programDao.deleteDayById(dayId)
+
+    suspend fun addLift(
+        dayId: String,
+        name: String,
+        setsMin: Int,
+        setsMax: Int,
+        repsMin: Int,
+        repsMax: Int,
+        effort: Effort,
+        muscle: String,
+        equipment: String,
+    ): String {
+        val newId = UUID.randomUUID().toString()
+        val nextOrder = (programDao.maxLiftOrder(dayId) ?: -1) + 1
+        programDao.insertLift(
+            LiftEntity(
+                id = newId,
+                dayId = dayId,
+                name = name,
+                setsMin = setsMin,
+                setsMax = setsMax,
+                repsMin = repsMin,
+                repsMax = repsMax,
+                effort = effort,
+                muscle = muscle,
+                equipment = equipment,
+                orderIndex = nextOrder,
+            )
+        )
+        return newId
+    }
+
+    suspend fun updateLift(
+        liftId: String,
+        name: String,
+        setsMin: Int,
+        setsMax: Int,
+        repsMin: Int,
+        repsMax: Int,
+        effort: Effort,
+        muscle: String,
+        equipment: String,
+    ) {
+        val current = programDao.getLift(liftId) ?: return
+        programDao.updateLift(
+            current.copy(
+                name = name,
+                setsMin = setsMin,
+                setsMax = setsMax,
+                repsMin = repsMin,
+                repsMax = repsMax,
+                effort = effort,
+                muscle = muscle,
+                equipment = equipment,
+            )
+        )
+    }
+
+    suspend fun deleteLift(liftId: String) = programDao.deleteLiftById(liftId)
 
     private suspend fun ensureSession(dayId: String, week: Int): SessionEntity {
         sessionDao.findSession(dayId, week)?.let { return it }

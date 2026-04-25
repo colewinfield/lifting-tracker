@@ -31,9 +31,13 @@ import com.colewinfield.liftingtracker.data.ThemeMode
 import com.colewinfield.liftingtracker.ui.components.LtNavBar
 import com.colewinfield.liftingtracker.ui.components.LtNavItem
 import com.colewinfield.liftingtracker.ui.navigation.LtDestination
+import com.colewinfield.liftingtracker.ui.screens.DayEditScreen
 import com.colewinfield.liftingtracker.ui.screens.DetailTab
 import com.colewinfield.liftingtracker.ui.screens.ExerciseDetailScreen
 import com.colewinfield.liftingtracker.ui.screens.HistoryScreen
+import com.colewinfield.liftingtracker.ui.screens.LiftEditScreen
+import com.colewinfield.liftingtracker.ui.screens.NEW_ID
+import com.colewinfield.liftingtracker.ui.screens.ProgramEditScreen
 import com.colewinfield.liftingtracker.ui.screens.ProgramScreen
 import com.colewinfield.liftingtracker.ui.screens.ProfileScreen
 import com.colewinfield.liftingtracker.ui.screens.TodayScreen
@@ -129,7 +133,50 @@ fun LiftingTrackerApp() {
             }
             composable(LtDestination.Program.route) { ProgramScreen() }
             composable(LtDestination.History.route) { HistoryScreen() }
-            composable(LtDestination.You.route)     { ProfileScreen() }
+            composable(LtDestination.You.route) {
+                ProfileScreen(
+                    onEditProgram = { navController.navigate("program/edit") },
+                )
+            }
+            composable("program/edit") {
+                ProgramEditScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenDay = { dayId ->
+                        navController.navigate("program/edit/day/$dayId")
+                    },
+                    onAddDay = {
+                        navController.navigate("program/edit/day/$NEW_ID")
+                    },
+                )
+            }
+            composable(
+                route = "program/edit/day/{dayId}",
+                arguments = listOf(navArgument("dayId") { type = NavType.StringType }),
+            ) { entry ->
+                val dayId = entry.arguments?.getString("dayId") ?: return@composable
+                DayEditScreen(
+                    dayId = dayId,
+                    onBack = { navController.popBackStack() },
+                    onOpenLift = { resolvedDayId, liftId ->
+                        navController.navigate("program/edit/day/$resolvedDayId/lift/$liftId")
+                    },
+                )
+            }
+            composable(
+                route = "program/edit/day/{dayId}/lift/{liftId}",
+                arguments = listOf(
+                    navArgument("dayId") { type = NavType.StringType },
+                    navArgument("liftId") { type = NavType.StringType },
+                ),
+            ) { entry ->
+                val dayId = entry.arguments?.getString("dayId") ?: return@composable
+                val liftId = entry.arguments?.getString("liftId") ?: return@composable
+                LiftEditScreen(
+                    liftId = liftId,
+                    dayId = dayId,
+                    onBack = { navController.popBackStack() },
+                )
+            }
             composable(
                 route = "exercise/{liftId}?tab={tab}",
                 arguments = listOf(

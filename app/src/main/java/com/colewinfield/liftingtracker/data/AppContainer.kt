@@ -26,6 +26,12 @@ object AppContainer {
 
     private fun build(context: Context): LiftingRepository {
         val db = LiftingDatabase.get(context)
-        return LiftingRepository(db.programDao(), db.sessionDao(), db.noteDao())
+        return LiftingRepository(
+            programDao = db.programDao(),
+            sessionDao = db.sessionDao(),
+            noteDao = db.noteDao(),
+            catalogDao = db.catalogDao(),
+            assetReader = { path -> context.applicationContext.assets.open(path) },
+        )
     }
 }

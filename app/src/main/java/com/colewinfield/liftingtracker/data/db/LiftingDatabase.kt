@@ -15,12 +15,13 @@ import androidx.room.TypeConverters
         SessionEntity::class,
         PerformedSetEntity::class,
         NoteEntity::class,
+        CatalogLiftEntity::class,
     ],
     // Bump on any schema-relevant change while we're still using fallbackToDestructiveMigration.
-    // (v1 stored Day.dayOfWeek as a free-form String like "Monday"; v2 stores the Weekday enum
-    // name like "MON", which the v1 rows can't deserialize.) Replace with proper Migration
-    // objects before this app sees real-world data.
-    version = 2,
+    // v1: free-form day-of-week string. v2: Weekday enum + paired converter. v3: catalog_lifts
+    // table for the free-exercise-db library. Replace with proper Migration objects before this
+    // app sees real-world data.
+    version = 3,
     // exportSchema = true requires `ksp { arg("room.schemaLocation", ...) }` in build.gradle.kts.
     // Flip on when we start writing real migrations.
     exportSchema = false,
@@ -30,6 +31,7 @@ abstract class LiftingDatabase : RoomDatabase() {
     abstract fun programDao(): ProgramDao
     abstract fun sessionDao(): SessionDao
     abstract fun noteDao(): NoteDao
+    abstract fun catalogDao(): CatalogDao
 
     companion object {
         const val DB_NAME = "lifting.db"

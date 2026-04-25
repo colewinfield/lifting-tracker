@@ -160,6 +160,32 @@ data class NoteEntity(
     val whoopsy: Boolean,
 )
 
+// ----- Catalog -----
+
+// Read-only library of exercises (free-exercise-db, Unlicense). Seeded once from
+// assets/exercises.json on first launch. Kept in its own table so program lifts and
+// library lifts don't collide — a program lift carries user-customised set/rep ranges and
+// belongs to a Day; a catalog row is just an exercise definition.
+@Entity(
+    tableName = "catalog_lifts",
+    indices = [
+        Index("primaryMuscle"),
+        Index("equipment"),
+        Index("name"),
+    ],
+)
+data class CatalogLiftEntity(
+    @PrimaryKey val id: String,            // free-exercise-db slug (e.g. "Romanian_Deadlift")
+    val name: String,
+    val primaryMuscle: String,             // normalized lowercase (e.g. "hamstrings")
+    val secondaryMuscles: List<String>,    // normalized lowercase
+    val equipment: String,                 // normalized lowercase ("" when unknown)
+    val category: String,                  // strength / stretching / plyometrics / ...
+    val force: String?,                    // push / pull / static / null
+    val mechanic: String?,                 // compound / isolation / null
+    val level: String,                     // beginner / intermediate / expert
+)
+
 // ----- Relations -----
 
 data class DayWithLifts(

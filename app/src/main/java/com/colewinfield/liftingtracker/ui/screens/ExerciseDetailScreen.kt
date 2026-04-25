@@ -41,7 +41,10 @@ import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -95,13 +98,24 @@ fun ExerciseDetailScreen(
         factory = ExerciseDetailViewModel.factory(repo, liftId, initialTab),
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var showSwap by rememberSaveable { mutableStateOf(false) }
     ExerciseDetailContent(
         state = state,
         onBack = onBack,
         onSelectTab = viewModel::selectTab,
-        onSwap = { /* TODO: open swap sheet */ },
+        onSwap = { showSwap = true },
         modifier = modifier,
     )
+    if (showSwap) {
+        // Detail isn't session-bound, so picking a swap here is browse-only — the sheet just
+        // closes. (A future "apply to today" flow would need shared state across screens.)
+        SwapSheet(
+            liftId = liftId,
+            liftName = state.lift?.name.orEmpty(),
+            onClose = { showSwap = false },
+            onPick = { showSwap = false },
+        )
+    }
 }
 
 @Composable
