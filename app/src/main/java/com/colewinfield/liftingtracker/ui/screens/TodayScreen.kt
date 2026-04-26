@@ -91,7 +91,10 @@ fun TodayScreen(
     val context = LocalContext.current
     val repo = remember(context) { AppContainer.repository(context) }
     val settingsRepo = remember(context) { AppContainer.settings(context) }
-    val viewModel: TodayViewModel = viewModel(factory = TodayViewModel.factory(repo, settingsRepo))
+    val backupScheduler = remember(context) { AppContainer.backupScheduler(context) }
+    val viewModel: TodayViewModel = viewModel(
+        factory = TodayViewModel.factory(repo, settingsRepo, backupScheduler),
+    )
     val state by viewModel.state.collectAsStateWithLifecycle()
     TodayContent(
         state = state,

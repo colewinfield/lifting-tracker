@@ -6,9 +6,11 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.colewinfield.liftingtracker.data.AppSettings
 import com.colewinfield.liftingtracker.data.LiftingRepository
+import com.colewinfield.liftingtracker.data.ReminderTier
 import com.colewinfield.liftingtracker.data.SettingsRepository
 import com.colewinfield.liftingtracker.data.ThemeMode
 import com.colewinfield.liftingtracker.data.WeightUnit
+import com.colewinfield.liftingtracker.data.weekAndCycle
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -28,6 +30,8 @@ data class ProfileUiState(
     val bodyweight: Double,
     val heightInches: Int,
     val age: Int,
+    val reminderTier: ReminderTier,
+    val remindersEnabled: Boolean,
 ) {
     companion object {
         val Empty = ProfileUiState(
@@ -37,12 +41,14 @@ data class ProfileUiState(
             unit = WeightUnit.LB,
             themeMode = ThemeMode.SYSTEM,
             useDynamicColor = true,
-            currentWeek = AppSettings.Defaults.currentWeek,
+            currentWeek = 1,
             cycleLength = 9,
             displayName = AppSettings.Defaults.displayName,
             bodyweight = AppSettings.Defaults.bodyweight,
             heightInches = AppSettings.Defaults.heightInches,
             age = AppSettings.Defaults.age,
+            reminderTier = AppSettings.Defaults.reminderTier,
+            remindersEnabled = AppSettings.Defaults.reminderEnabledLeads.isNotEmpty(),
         )
     }
 }
@@ -57,19 +63,23 @@ class ProfileViewModel(
         repo.observeCurrentProgram(),
         repo.observeAllSessions(),
     ) { settings, program, sessions ->
+        val cycleLength = program?.cycleLength ?: 9
+        val wc = weekAndCycle(settings.cycleStartedAt, cycleLength)
         ProfileUiState(
             programName = program?.name ?: "—",
             sessionCount = sessions.count { it.finishedAt != null },
-            cycleNumber = 1,
+            cycleNumber = wc.cycle,
             unit = settings.unit,
             themeMode = settings.themeMode,
             useDynamicColor = settings.useDynamicColor,
-            currentWeek = settings.currentWeek,
-            cycleLength = program?.cycleLength ?: 9,
+            currentWeek = wc.week,
+            cycleLength = cycleLength,
             displayName = settings.displayName,
             bodyweight = settings.bodyweight,
             heightInches = settings.heightInches,
             age = settings.age,
+            reminderTier = settings.reminderTier,
+            remindersEnabled = settings.reminderEnabledLeads.isNotEmpty(),
         )
     }.stateIn(
         scope = viewModelScope,
@@ -90,12 +100,6 @@ class ProfileViewModel(
 
     fun setDynamicColor(enabled: Boolean) {
         viewModelScope.launch { settingsRepo.setUseDynamicColor(enabled) }
-    }
-
-    fun setCurrentWeek(week: Int) {
-        viewModelScope.launch {
-            settingsRepo.setCurrentWeek(week.coerceIn(1, state.value.cycleLength))
-        }
     }
 
     fun saveProfile(name: String, bodyweight: Double, heightInches: Int, age: Int) {

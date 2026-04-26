@@ -1,9 +1,11 @@
 package com.colewinfield.liftingtracker.data
 
+import androidx.room.withTransaction
 import com.colewinfield.liftingtracker.data.db.CatalogDao
 import com.colewinfield.liftingtracker.data.db.CatalogLiftEntity
 import com.colewinfield.liftingtracker.data.db.DayEntity
 import com.colewinfield.liftingtracker.data.db.LiftEntity
+import com.colewinfield.liftingtracker.data.db.LiftingDatabase
 import com.colewinfield.liftingtracker.data.db.NoteDao
 import com.colewinfield.liftingtracker.data.db.NoteEntity
 import com.colewinfield.liftingtracker.data.db.PerformedSetEntity
@@ -11,6 +13,7 @@ import com.colewinfield.liftingtracker.data.db.ProgramDao
 import com.colewinfield.liftingtracker.data.db.SessionDao
 import com.colewinfield.liftingtracker.data.db.SessionEntity
 import com.colewinfield.liftingtracker.data.db.toAlternative
+import com.colewinfield.liftingtracker.data.db.toCatalogLift
 import com.colewinfield.liftingtracker.data.db.toDomain
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -30,6 +33,7 @@ data class ActiveSessionState(
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LiftingRepository(
+    private val database: LiftingDatabase,
     private val programDao: ProgramDao,
     private val sessionDao: SessionDao,
     private val noteDao: NoteDao,
@@ -116,6 +120,14 @@ class LiftingRepository(
     suspend fun finishSession(sessionId: String) {
         sessionDao.markSessionFinished(sessionId, System.currentTimeMillis())
     }
+
+    /**
+     * True if a session for [dayId] at [week] exists and was already marked finished. Used by
+     * [ReminderWorker] to suppress a "you missed today" nudge when the user actually completed
+     * the workout. Returns false if there's no session row yet (the user hasn't logged anything).
+     */
+    suspend fun isSessionFinished(dayId: String, week: Int): Boolean =
+        sessionDao.findSession(dayId, week)?.finishedAt != null
 
     /**
      * Most-recent prior session containing logged sets for the given lift.
@@ -212,6 +224,52 @@ class LiftingRepository(
         // Catalog seeding is independent — it's a read-only library, not user data.
         // CatalogSeeder.seed() short-circuits if the table is already populated.
         CatalogSeeder.seed(catalogDao, assetReader)
+    }
+
+    // ----- Snapshot export / import -----
+
+    /**
+     * Read every user-authored row + the current settings into an in-memory [Snapshot]. Settings
+     * are passed in (rather than fetched here) so the snapshot's settings come from the same
+     * SettingsRepository instance the rest of the app sees, without coupling this repository to
+     * DataStore. The catalog table is excluded — it's re-seeded from the bundled asset on every
+     * fresh install, and re-shipping ~900 read-only rows in every snapshot would just bloat the
+     * file.
+     */
+    suspend fun exportSnapshot(settings: AppSettings): Snapshot = Snapshot(
+        schemaVersion = Snapshot.CURRENT_SCHEMA_VERSION,
+        exportedAt = System.currentTimeMillis(),
+        settings = settings,
+        programs = programDao.getAllPrograms(),
+        days = programDao.getAllDays(),
+        lifts = programDao.getAllLifts(),
+        alternatives = programDao.getAllAlternatives(),
+        sessions = sessionDao.getAllSessionsList(),
+        performedSets = sessionDao.getAllPerformedSetsList(),
+        notes = noteDao.getAllNotes(),
+    )
+
+    /**
+     * Replace every user-authored row with the snapshot's contents in a single transaction.
+     * Insert order matters because of FK declarations (programs → days → lifts → alternatives;
+     * days → sessions → performed_sets; lifts → notes). The opening `deleteAllPrograms()` cascades
+     * across every dependent table, so this is a true wipe-and-replace, not a merge.
+     *
+     * Catalog rows are not touched — they're seeded separately and aren't user data. Settings
+     * restoration is the caller's responsibility (see BackupService) since DataStore lives
+     * outside Room.
+     */
+    suspend fun importSnapshot(snapshot: Snapshot) {
+        database.withTransaction {
+            programDao.deleteAllPrograms()
+            programDao.insertPrograms(snapshot.programs)
+            programDao.insertDays(snapshot.days)
+            programDao.insertLifts(snapshot.lifts)
+            programDao.insertAlternatives(snapshot.alternatives)
+            sessionDao.insertSessions(snapshot.sessions)
+            sessionDao.insertPerformedSets(snapshot.performedSets)
+            noteDao.insertAll(snapshot.notes)
+        }
     }
 
     // ----- Catalog (free-exercise-db) -----
@@ -318,6 +376,36 @@ class LiftingRepository(
         limit: Int = 80,
     ): List<Alternative> = catalogDao.page(offset, limit).map { row ->
         row.toAlternative(sourceLiftId = sourceLiftId, overlapPercent = 0)
+    }
+
+    /**
+     * Catalog browser query — drives the standalone Exercise DB picker. Returns [CatalogLift]
+     * (no overlap badge) instead of [Alternative].
+     *
+     * Selection rules:
+     * - If [primaryMuscle] is non-null, results are restricted to that primary muscle. A non-blank
+     *   [query] then narrows by name match within the muscle group (in-memory, since the muscle
+     *   list is short).
+     * - Otherwise if [query] is non-blank, run the free-text DAO search across name + primary
+     *   muscle.
+     * - Otherwise return the first [limit] rows alphabetically.
+     */
+    suspend fun browseCatalog(
+        query: String,
+        primaryMuscle: String?,
+        limit: Int = 100,
+    ): List<CatalogLift> {
+        val q = query.trim()
+        val rows = when {
+            primaryMuscle != null -> {
+                val byMuscle = catalogDao.byPrimaryMuscle(primaryMuscle)
+                if (q.isBlank()) byMuscle
+                else byMuscle.filter { it.name.contains(q, ignoreCase = true) }
+            }
+            q.isNotBlank() -> catalogDao.search("%$q%", limit)
+            else -> catalogDao.page(offset = 0, limit = limit)
+        }
+        return rows.take(limit).map { it.toCatalogLift() }
     }
 
     // ----- Program / Day / Lift edits -----

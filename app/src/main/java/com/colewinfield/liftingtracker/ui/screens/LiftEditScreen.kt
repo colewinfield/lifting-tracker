@@ -33,15 +33,16 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.SavedStateHandle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,11 +61,24 @@ import com.colewinfield.liftingtracker.ui.components.LtCardVariant
 import com.colewinfield.liftingtracker.ui.theme.RobotoMono
 import com.colewinfield.liftingtracker.ui.theme.appColors
 
+/**
+ * Keys used to hand a picked catalog lift back from the [ExerciseDBScreen] picker route.
+ * The picker writes these into the previous backstack entry's `SavedStateHandle`; this screen's
+ * [LaunchedEffect] reads + clears them, then forwards into the VM.
+ */
+object ExercisePickerResult {
+    const val NAME_KEY = "exercise_picker_name"
+    const val MUSCLE_KEY = "exercise_picker_muscle"
+    const val EQUIPMENT_KEY = "exercise_picker_equipment"
+}
+
 @Composable
 fun LiftEditScreen(
     liftId: String,
     dayId: String,
     onBack: () -> Unit,
+    onPickExercise: () -> Unit,
+    pickerResultHandle: SavedStateHandle?,
 ) {
     val context = LocalContext.current
     val repo = remember(context) { AppContainer.repository(context) }
@@ -73,8 +87,26 @@ fun LiftEditScreen(
         factory = LiftEditViewModel.factory(repo, liftId, dayId),
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var showIdentityDialog by rememberSaveable { mutableStateOf(false) }
     var showDeleteConfirm by rememberSaveable { mutableStateOf(false) }
+
+    // Observe the picker result via the SavedStateHandle's StateFlow — direct writes don't
+    // recompose consumers on their own. Guard on state.loaded so the apply doesn't race with
+    // the VM's initial DB load (which would otherwise clobber the pick). Clear all three keys
+    // after applying so a back-then-forward navigation doesn't re-apply stale data.
+    LaunchedEffect(pickerResultHandle, state.loaded) {
+        val handle = pickerResultHandle ?: return@LaunchedEffect
+        if (!state.loaded) return@LaunchedEffect
+        handle.getStateFlow<String?>(ExercisePickerResult.NAME_KEY, null)
+            .collect { name ->
+                if (name.isNullOrBlank()) return@collect
+                val muscle = handle.get<String>(ExercisePickerResult.MUSCLE_KEY).orEmpty()
+                val equipment = handle.get<String>(ExercisePickerResult.EQUIPMENT_KEY).orEmpty()
+                viewModel.setIdentity(name, muscle, equipment)
+                handle.remove<String>(ExercisePickerResult.NAME_KEY)
+                handle.remove<String>(ExercisePickerResult.MUSCLE_KEY)
+                handle.remove<String>(ExercisePickerResult.EQUIPMENT_KEY)
+            }
+    }
 
     Column(
         modifier = Modifier
@@ -97,13 +129,14 @@ fun LiftEditScreen(
                 .padding(start = 16.dp, end = 16.dp, bottom = 100.dp)
                 .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)),
         ) {
-            // Exercise picker (placeholder until catalog lands)
+            // Exercise picker — taps push the ExerciseDBScreen route, which writes the picked
+            // catalog lift back through pickerResultHandle (consumed by the LaunchedEffect above).
             EditSectionLabel("EXERCISE", topPadding = 12)
             ExerciseIdentityCard(
                 name = state.name,
                 muscle = state.muscle,
                 equipment = state.equipment,
-                onClick = { showIdentityDialog = true },
+                onClick = onPickExercise,
             )
 
             // Set range
@@ -194,19 +227,6 @@ fun LiftEditScreen(
                 }
             }
         }
-    }
-
-    if (showIdentityDialog) {
-        ExerciseIdentityDialog(
-            initialName = state.name,
-            initialMuscle = state.muscle,
-            initialEquipment = state.equipment,
-            onClose = { showIdentityDialog = false },
-            onSave = { name, muscle, equip ->
-                viewModel.setIdentity(name, muscle, equip)
-                showIdentityDialog = false
-            },
-        )
     }
 
     if (showDeleteConfirm) {
@@ -382,50 +402,3 @@ private fun EffortChoice(
     }
 }
 
-@Composable
-private fun ExerciseIdentityDialog(
-    initialName: String,
-    initialMuscle: String,
-    initialEquipment: String,
-    onClose: () -> Unit,
-    onSave: (name: String, muscle: String, equipment: String) -> Unit,
-) {
-    var name by remember { mutableStateOf(initialName) }
-    var muscle by remember { mutableStateOf(initialMuscle) }
-    var equipment by remember { mutableStateOf(initialEquipment) }
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text("Exercise") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Name") },
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = muscle,
-                    onValueChange = { muscle = it },
-                    label = { Text("Muscle") },
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = equipment,
-                    onValueChange = { equipment = it },
-                    label = { Text("Equipment") },
-                    singleLine = true,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onSave(name.trim(), muscle.trim(), equipment.trim()) },
-                enabled = name.trim().isNotEmpty(),
-            ) { Text("Save") }
-        },
-        dismissButton = {
-            TextButton(onClick = onClose) { Text("Cancel") }
-        },
-    )
-}

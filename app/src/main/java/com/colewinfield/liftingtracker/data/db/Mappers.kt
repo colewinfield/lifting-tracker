@@ -1,6 +1,7 @@
 package com.colewinfield.liftingtracker.data.db
 
 import com.colewinfield.liftingtracker.data.Alternative
+import com.colewinfield.liftingtracker.data.CatalogLift
 import com.colewinfield.liftingtracker.data.Day
 import com.colewinfield.liftingtracker.data.Lift
 import com.colewinfield.liftingtracker.data.Note
@@ -122,6 +123,17 @@ fun CatalogLiftEntity.toAlternative(sourceLiftId: String, overlapPercent: Int): 
         equipment = displayEquipment(equipment),
         overlapPercent = overlapPercent,
     )
+
+/** Project a catalog row into the lighter [CatalogLift] domain type used by the picker flow. */
+fun CatalogLiftEntity.toCatalogLift(): CatalogLift = CatalogLift(
+    id = id,
+    name = name,
+    primaryMuscle = primaryMuscle,
+    displayMuscle = displayMuscle(primaryMuscle),
+    equipment = equipment,
+    displayEquipment = displayEquipment(equipment),
+    mechanic = mechanic,
+)
 
 /** Title-case a normalised muscle token for display. "lats" -> "Lats", "" -> "—". */
 fun displayMuscle(normalized: String): String = when {

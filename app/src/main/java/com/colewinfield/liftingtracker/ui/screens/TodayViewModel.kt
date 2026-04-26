@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.colewinfield.liftingtracker.data.ActiveSessionState
 import com.colewinfield.liftingtracker.data.Alternative
 import com.colewinfield.liftingtracker.data.AppSettings
+import com.colewinfield.liftingtracker.data.BackupScheduler
 import com.colewinfield.liftingtracker.data.Day
 import com.colewinfield.liftingtracker.data.HistoryEntry
 import com.colewinfield.liftingtracker.data.LiftingRepository
@@ -15,6 +16,7 @@ import com.colewinfield.liftingtracker.data.PerformedSet
 import com.colewinfield.liftingtracker.data.Program
 import com.colewinfield.liftingtracker.data.SettingsRepository
 import com.colewinfield.liftingtracker.data.Weekday
+import com.colewinfield.liftingtracker.data.weekAndCycle
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -85,6 +87,7 @@ private data class TodaySources(
 class TodayViewModel(
     private val repo: LiftingRepository,
     private val settingsRepo: SettingsRepository,
+    private val backupScheduler: BackupScheduler,
 ) : ViewModel() {
 
     private val uiOnly = MutableStateFlow(UiOnly())
@@ -107,7 +110,11 @@ class TodayViewModel(
         if (src.day == null) {
             flowOf(Triple(src, ActiveSessionState(sessionId = null, setsByLift = emptyMap()), emptyMap<String, List<Note>>()))
         } else {
-            val active = repo.observeActiveSession(src.day.id, src.settings.currentWeek)
+            val week = weekAndCycle(
+                src.settings.cycleStartedAt,
+                src.program?.cycleLength ?: 1,
+            ).week
+            val active = repo.observeActiveSession(src.day.id, week)
             val notes = repo.observeNotesByLift(src.day.lifts.map { it.id })
             combine(active, notes) { a, n -> Triple(src, a, n) }
         }
@@ -117,12 +124,16 @@ class TodayViewModel(
         } else emptyMap()
         val expanded = if (src.ui.userToggled) src.ui.expandedLiftId
             else src.day?.lifts?.firstOrNull()?.id
+        val derivedWeek = weekAndCycle(
+            src.settings.cycleStartedAt,
+            src.program?.cycleLength ?: 1,
+        ).week
         TodayUiState(
             program = src.program,
             day = src.day,
             weekday = src.weekday,
-            weekNumber = src.settings.currentWeek,
-            isDeload = src.program?.let { src.settings.currentWeek == it.deloadWeek } ?: false,
+            weekNumber = derivedWeek,
+            isDeload = src.program?.let { derivedWeek == it.deloadWeek } ?: false,
             sessionId = active.sessionId,
             sets = active.setsByLift,
             lastWeekByLift = lastWeek,
@@ -162,9 +173,10 @@ class TodayViewModel(
             }
             val weight = historicalSet?.weight ?: 0.0
             val reps = historicalSet?.reps ?: lift.reps.first
+            val week = weekAndCycle(s.cycleStartedAt, current.program?.cycleLength ?: 1).week
             repo.appendSet(
                 dayId = day.id,
-                week = s.currentWeek,
+                week = week,
                 liftId = liftId,
                 weight = weight,
                 reps = reps,
@@ -193,6 +205,13 @@ class TodayViewModel(
             state.value.sessionId?.let { repo.finishSession(it) }
             // Swaps are session-scoped — clear them once the user finishes.
             uiOnly.update { it.copy(swapsByLift = emptyMap()) }
+            // Finishing a session is the natural moment to back up: the user just made the
+            // most concrete change to their data and is most likely to want it persisted right
+            // now. The scheduler enqueues a one-shot worker (KEEP policy) so multiple finishes
+            // in quick succession coalesce, and BackupService's SHA short-circuit means a
+            // no-change finish is a fast no-op. Safe to call when no folder is configured —
+            // the worker just succeeds silently.
+            backupScheduler.scheduleBackupNow()
         }
     }
 
@@ -228,10 +247,12 @@ class TodayViewModel(
         if (trimmed.isEmpty()) return
         viewModelScope.launch {
             val s = settingsState.value
-            val day = state.value.day ?: return@launch
+            val current = state.value
+            val day = current.day ?: return@launch
+            val week = weekAndCycle(s.cycleStartedAt, current.program?.cycleLength ?: 1).week
             repo.appendNote(
                 dayId = day.id,
-                week = s.currentWeek,
+                week = week,
                 liftId = liftId,
                 text = trimmed,
                 whoopsy = whoopsy,
@@ -244,8 +265,12 @@ class TodayViewModel(
     }
 
     companion object {
-        fun factory(repo: LiftingRepository, settingsRepo: SettingsRepository) = viewModelFactory {
-            initializer { TodayViewModel(repo, settingsRepo) }
+        fun factory(
+            repo: LiftingRepository,
+            settingsRepo: SettingsRepository,
+            backupScheduler: BackupScheduler,
+        ) = viewModelFactory {
+            initializer { TodayViewModel(repo, settingsRepo, backupScheduler) }
         }
     }
 }

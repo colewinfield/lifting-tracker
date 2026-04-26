@@ -71,7 +71,16 @@ dependencies {
     // DataStore (settings persistence)
     implementation(libs.androidx.datastore.preferences)
 
+    // DocumentFile (SAF tree-URI traversal for Drive/local backup folder)
+    implementation(libs.androidx.documentfile)
+
+    // WorkManager (auto-backup scheduler)
+    implementation(libs.androidx.work.runtime.ktx)
+
     testImplementation(libs.junit)
+    // Real org.json impl — Android's android.jar stubs raise "Stub!" in JVM unit tests, so the
+    // SnapshotCodec tests need an actual implementation on the test classpath.
+    testImplementation(libs.org.json)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

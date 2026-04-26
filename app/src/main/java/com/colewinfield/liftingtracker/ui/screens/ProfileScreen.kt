@@ -33,12 +33,15 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -54,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.colewinfield.liftingtracker.data.AppContainer
+import com.colewinfield.liftingtracker.data.ReminderTier
 import com.colewinfield.liftingtracker.data.ThemeMode
 import com.colewinfield.liftingtracker.data.WeightUnit
 import com.colewinfield.liftingtracker.ui.components.LtCard
@@ -62,11 +66,13 @@ import com.colewinfield.liftingtracker.ui.components.LtTopAppBar
 import com.colewinfield.liftingtracker.ui.components.LtTopAppBarVariant
 import com.colewinfield.liftingtracker.ui.theme.LiftingTrackerTheme
 import com.colewinfield.liftingtracker.ui.theme.RobotoMono
+import kotlinx.coroutines.launch
 
 @Composable
 fun ProfileScreen(
     modifier: Modifier = Modifier,
     onEditProgram: () -> Unit = {},
+    onOpenReminders: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val repo = remember(context) { AppContainer.repository(context) }
@@ -81,6 +87,7 @@ fun ProfileScreen(
         onSetDynamicColor = viewModel::setDynamicColor,
         onSaveProfile = viewModel::saveProfile,
         onEditProgram = onEditProgram,
+        onOpenReminders = onOpenReminders,
         modifier = modifier,
     )
 }
@@ -94,10 +101,14 @@ private fun ProfileContent(
     onSetDynamicColor: (Boolean) -> Unit,
     onSaveProfile: (name: String, bodyweight: Double, heightInches: Int, age: Int) -> Unit,
     onEditProgram: () -> Unit,
+    onOpenReminders: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showEditSheet by rememberSaveable { mutableStateOf(false) }
     val openEdit = { showEditSheet = true }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -112,6 +123,7 @@ private fun ProfileContent(
                 },
             )
         },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -133,6 +145,14 @@ private fun ProfileContent(
                     onSetThemeMode = onSetThemeMode,
                     onSetDynamicColor = onSetDynamicColor,
                     onEditProgram = onEditProgram,
+                    onOpenReminders = onOpenReminders,
+                )
+            }
+            item {
+                BackupSection(
+                    onShowMessage = { msg ->
+                        coroutineScope.launch { snackbarHostState.showSnackbar(msg) }
+                    },
                 )
             }
         }
@@ -265,7 +285,9 @@ private fun SettingsCard(
     onSetThemeMode: (ThemeMode) -> Unit,
     onSetDynamicColor: (Boolean) -> Unit,
     onEditProgram: () -> Unit,
+    onOpenReminders: () -> Unit,
 ) {
+    val reminderTrailing = if (state.remindersEnabled) state.reminderTier.label else "Off"
     LtCard(modifier = Modifier.fillMaxWidth(), variant = LtCardVariant.Filled) {
         Column(modifier = Modifier.padding(4.dp)) {
             SettingRow(
@@ -277,8 +299,8 @@ private fun SettingsCard(
             SettingRow(
                 icon = Icons.Default.Notifications,
                 label = "Reminders",
-                trailingText = "Firm",
-                onClick = { /* TODO: open reminders */ },
+                trailingText = reminderTrailing,
+                onClick = onOpenReminders,
             )
             SettingRow(
                 icon = Icons.Default.FitnessCenter,
@@ -423,12 +445,15 @@ private fun ProfileScreenPreview() {
                 bodyweight = 185.0,
                 heightInches = 71,
                 age = 28,
+                reminderTier = ReminderTier.FIRM,
+                remindersEnabled = true,
             ),
             onToggleUnit = {},
             onSetThemeMode = {},
             onSetDynamicColor = {},
             onSaveProfile = { _, _, _, _ -> },
             onEditProgram = {},
+            onOpenReminders = {},
         )
     }
 }

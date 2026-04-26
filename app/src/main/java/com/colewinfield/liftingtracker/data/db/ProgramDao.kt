@@ -22,6 +22,9 @@ interface ProgramDao {
     suspend fun insertProgram(program: ProgramEntity)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPrograms(programs: List<ProgramEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDays(days: List<DayEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -73,4 +76,25 @@ interface ProgramDao {
 
     @Query("SELECT MAX(orderIndex) FROM lifts WHERE dayId = :dayId")
     suspend fun maxLiftOrder(dayId: String): Int?
+
+    // ----- Snapshot export / import -----
+    // The export reads every row directly (not via the relation graph) so the snapshot can
+    // round-trip orderIndex / FKs verbatim. The delete-all is the restore "wipe" — programs is
+    // the root and CASCADE takes out days, lifts, alternatives, sessions, performed_sets, and
+    // notes in one go. (Catalog rows live in their own table and are re-seeded from the asset.)
+
+    @Query("SELECT * FROM programs")
+    suspend fun getAllPrograms(): List<ProgramEntity>
+
+    @Query("SELECT * FROM days")
+    suspend fun getAllDays(): List<DayEntity>
+
+    @Query("SELECT * FROM lifts")
+    suspend fun getAllLifts(): List<LiftEntity>
+
+    @Query("SELECT * FROM alternatives")
+    suspend fun getAllAlternatives(): List<AlternativeEntity>
+
+    @Query("DELETE FROM programs")
+    suspend fun deleteAllPrograms()
 }

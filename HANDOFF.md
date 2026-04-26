@@ -1,6 +1,6 @@
 # Session Handoff — Lifting Tracker
 
-Last touched 2026-04-25 (session: Program/Day/Lift edit screens + free-exercise-db catalog wired into Swap). Personal Android app for a 9-week cyclic hypertrophy lifting program. The full design spec is in `project/design_handoff_lifting_tracker/README.md` — read that first.
+Last touched 2026-04-25 (session: (1) catalog-backed Lift-edit exercise picker — replaces the 3-field manual identity dialog with a navigation push into `ExerciseDBScreen`, then (2) auto-advance week + cycle counter via a `cycleStartedAt: Long` anchor in settings, plus a 6-hour `PeriodicWorkRequest<BackupWorker>` enqueued from a new `LiftingTrackerApplication`). Personal Android app for a 9-week cyclic hypertrophy lifting program. The full design spec is in `project/design_handoff_lifting_tracker/README.md` — read that first.
 
 > **Visual rule (load-bearing):** When implementing any screen, follow the matching JSX in `project/design_handoff_lifting_tracker/design-source/screens/*.jsx` **exactly**. The HANDOFF / README prose is intent commentary that sometimes diverges from the actual mocks. JSX wins, every time.
 
@@ -148,20 +148,72 @@ Last touched 2026-04-25 (session: Program/Day/Lift edit screens + free-exercise-
 - `TodayViewModel` no longer eagerly preloads `alternativesByLift` — the SwapSheet VM owns that fetch now, so the Today screen launches with one fewer round-trip per program lift. The `alternativesByLift` field on `TodayUiState` was removed; `TodayScreen` invocation passes `liftId` + `liftName` only.
 - `ExerciseDetailScreen` Swap icon now opens the same SwapSheet, but Detail isn't session-bound so picking a swap is browse-only (sheet just closes). A future "apply to today" flow would need cross-screen state.
 
-**Auto Backup → Google account (revised)**
+**Exercise DB picker (Lift-edit identity card)** — this session
+- `screens/extras2.jsx`'s `ExerciseDBScreen` lands as `ui/screens/ExerciseDBScreen.kt` + `ExerciseDBViewModel.kt`. Replaces the 3-field `ExerciseIdentityDialog` that used to back the EXERCISE row in Lift Edit.
+- Layout matches the JSX: small `LtTopAppBar` ("Exercises", trailing search icon as visual parity, no-op tap), a 48dp pill-shaped search bar (`surfaceContainer`, leading search icon, trailing filter icon when empty / clear icon when typed), a horizontally-scrolling `LazyRow` of filter chips (taxonomy: All / Chest / Back / Quads / Hamstrings / Shoulders / Biceps / Triceps — matches the JSX `filters` array exactly), then a `LazyColumn` of 44dp lift rows (rounded square `surfaceContainerHigh` icon container + 8dp effort dot top-right derived from `mechanic`: compound→High CNS, isolation→Low, null→Med; titleS name + bodyS `muscle · equipment`; trailing chevron).
+- `ExerciseDbFilter` enum maps JSX labels to normalised catalog tokens (`Quads`→`quadriceps`, `Back`→`lats`) — matches the `CatalogSeeder.normalizeMuscle` taxonomy.
+- New `data/Catalog.kt` introduces a `CatalogLift` domain class (id, name, muscle/equipment normalised + display, mechanic). `CatalogLiftEntity.toCatalogLift()` mapper lives in `data/db/Mappers.kt` next to the existing `toAlternative` projection. `CatalogLift` is intentionally separate from `Alternative` because the picker has no overlap percentage and renders no overlap pill — `Alternative` is reserved for the Swap flow.
+- New repo helper `LiftingRepository.browseCatalog(query, primaryMuscle, limit = 100)`. Selection rules: muscle-filter forces an in-memory name narrow within `byPrimaryMuscle`, query-only runs the DAO `search`, both-empty pages alphabetically. Caps at `limit` rows.
+- `ExerciseDBViewModel` mirrors the SwapSheet pattern: 180ms-debounced `querySignal` flow, immediate flush on filter chip change, single `loadJob` cancelled+restarted per query.
+- `ExercisePickerResult` (object in `LiftEditScreen.kt`) defines the `SavedStateHandle` keys (`NAME_KEY` / `MUSCLE_KEY` / `EQUIPMENT_KEY`) used to hand the pick back. The `exercise/picker` route is registered in `MainActivity.kt`; on row tap the picker writes the three keys onto `navController.previousBackStackEntry.savedStateHandle` and pops back.
+- `LiftEditScreen` now takes `onPickExercise: () -> Unit` + `pickerResultHandle: SavedStateHandle?`. The identity card's `onClick` invokes `onPickExercise` (no more dialog). A `LaunchedEffect` keyed on `(pickerResultHandle, state.loaded)` collects from `handle.getStateFlow<String?>(NAME_KEY, null)` — direct SavedStateHandle writes don't recompose consumers, so the StateFlow is the load-bearing observation primitive. The `state.loaded` guard prevents the apply from racing the VM's initial DB read (which would otherwise clobber the pick). After applying, all three keys are removed so a back-then-forward navigation doesn't re-apply stale data.
 
-What was claimed last session ("Android Auto Backup gives the user free Drive-backed restore") **is technically configured but not reliable in practice.** The XML rules in `xml/backup_rules.xml` and `xml/data_extraction_rules.xml` are correctly wired (default include-everything inside an empty `<full-backup-content>` and `<cloud-backup>`), and `android:allowBackup="true"` is set, but the actual snapshotting has fragile preconditions:
-- First snapshot waits ~24 hours after install AND requires the device to be idle, charging, AND on Wi-Fi simultaneously.
-- During development (install / use / uninstall in the same day) those conditions almost never align, so no backup ever exists at uninstall time. **Confirmed: user uninstalled, reinstalled, and lost everything — the snapshot was never taken.**
-- Even when it works, latency is up to 24 h. Auto Backup is "eventually consistent at best", not a real save-point.
+**Auto-advance week + cycle counter** — this session
+- `AppSettings.currentWeek: Int` is gone. Replaced by `AppSettings.cycleStartedAt: Long` — the wall-clock millis at which "week 1 of cycle 1" began. The live (week, cycle) pair is derived from elapsed time on every read by the new top-level helper `weekAndCycle(cycleStartedAt, cycleLength, now)` in `data/Settings.kt`. Sentinel `0L` falls back to `now − (defaultCurrentWeek − 1) × 7d` so a fresh launch (before persistence completes) still resolves to the seeded week. Companion helper `cycleAnchorFor(week, now)` computes the anchor that would put "today" at a given week of cycle 1.
+- `SettingsRepository`: `setCurrentWeek` is gone, replaced by `setCycleStartedAt`. The DataStore key renamed `current_week` (Int) → `cycle_started_at` (Long); old key is silently ignored on first read after upgrade (DataStore drops missing keys).
+- All consumers (`TodayViewModel`, `ProgramViewModel`, `HistoryViewModel`, `ProfileViewModel`) updated to call `weekAndCycle(settings.cycleStartedAt, program?.cycleLength ?: 1)` per emission. **`ProfileScreen`'s `cycleNumber` is now real** — was hardcoded `1`. **`HistoryViewModel.cycleNumber`** is also derived (was a hardcoded private val). `ProfileViewModel.setCurrentWeek` was removed (no UI consumer; future "set my week to N" CTA should call `settingsRepo.setCycleStartedAt(cycleAnchorFor(N))`).
+- `SnapshotCodec` now serialises `cycleStartedAt` instead of `currentWeek`. **Backward compat**: legacy snapshots (pre-cycleStartedAt) get their anchor reconstructed as `exportedAt − (currentWeek − 1) × 7d` so the user's apparent week is preserved on restore. After one round-trip the legacy key is gone. `BackupService.restoreNow` calls `setCycleStartedAt(s.cycleStartedAt)` instead of `setCurrentWeek`. New unit test covers the legacy-fallback path; existing round-trip tests updated for the new field.
 
-The personal-use commitment to "no cloud DB / no Sign-In" still holds for *every* part of the app except this one. For a *reliable* save-point the next session should add explicit Google Sign-In + Drive AppData sync. See "Drive AppData sync" under "Suggested next steps".
+**Periodic backup** — this session
+- New `LiftingTrackerApplication` subclass (registered in `AndroidManifest.xml` as `android:name=".LiftingTrackerApplication"`) does two things on `onCreate`:
+  1. Calls `BackupScheduler.schedulePeriodicBackup()` (idempotent — `ExistingPeriodicWorkPolicy.KEEP`).
+  2. On a `Dispatchers.Default` `SupervisorJob` scope, reads `settingsRepo.settings.first()` and persists `cycleStartedAt = cycleAnchorFor(SampleData.defaultCurrentWeek)` if the stored value is `0L`. This is the canonical first-launch initialiser; everywhere else can assume `cycleStartedAt > 0` because `weekAndCycle`'s `0L` fallback is only ever observed during the few-millis window before this Application coroutine wins.
+- `BackupScheduler.schedulePeriodicBackup()` enqueues a `PeriodicWorkRequest<BackupWorker>(6, HOURS)` under unique work name `lt-backup-periodic` with `KEEP` policy and the same `NetworkType.CONNECTED` constraint as the one-shot. **6 hours, not 30 minutes**: the post-`finishSession` one-shot trigger covers the high-value capture path (the user just made the most concrete change to their data), so the periodic worker only catches out-of-session edits — notes from Detail, program edits, profile changes. Those don't happen continuously; 6h gives ≤4 wakeups/day, and the SHA short-circuit makes idle ticks effectively free (read DB → encode → hash → compare → no I/O).
+- The previous `Last touched` paragraph still applies: `KEEP` for both unique work names means rapid-fire callers coalesce; the SHA short-circuit means a no-change tick is a fast no-op.
 
-What would *break* the Auto-Backup fallback (still worth not breaking, even if we add explicit sync):
-- Setting `allowBackup="false"` in the manifest — don't.
-- `<exclude domain="database" .../>` or `<exclude domain="file" .../>` in `backup_rules.xml` — don't.
-- Storing the DB outside `/data/data/<pkg>/databases/` (e.g. external storage) — don't.
-- Crossing the 25 MB cap by storing media (videos, demo GIFs) in app storage.
+**Backup (SAF-backed, user-picked folder)** — this session
+
+This session replaces the old "Auto Backup is fine" assumption with an explicit, user-controlled backup via the **Storage Access Framework**. The user picks a folder once via `ACTION_OPEN_DOCUMENT_TREE` (typically a folder in their Drive — the Drive Android app exposes Drive as a SAF provider), and from then on the app reads/writes a single `lifting-tracker-snapshot.json` in that folder. No OAuth, no Cloud Console, no `google-services.json`, no Play Services dep — the SAF picker handles auth via whichever provider the user picks.
+
+What was rejected and why:
+- **Android Auto Backup**: technically wired (manifest `allowBackup="true"`, `backup_rules.xml`) but proven unreliable in practice — first snapshot needs ~24h idle + charging + Wi-Fi, and the user already lost everything once on uninstall/reinstall.
+- **Drive AppData scope + Sign-In**: would have been silent-and-automatic but required Cloud Console OAuth + SHA-1 + `google-services.json`, plus per-token refresh + Play Services dep. SAF achieves the same online-persistence outcome with a one-time folder pick.
+
+**Files (all new this session unless noted):**
+- `data/Snapshot.kt` — in-memory data class for the full export. `CURRENT_SCHEMA_VERSION = 3` matches the Room DB version. Catalog rows excluded (re-seeded from `assets/exercises.json`). Defines `FILENAME` and `PARTIAL_FILENAME` constants for atomic-write naming.
+- `data/SnapshotCodec.kt` — pure (Snapshot ↔ String) JSON codec via `org.json` (same dep as CatalogSeeder). Backup-local settings (folder URI, lastBackupAt/Sha, hasCheckedForBackupRestore) deliberately *not* serialised — they're device-local and re-importing them would be circular. Enums fall back to defaults on unknown values, so a downgrade-with-new-enum-cases doesn't crash the decoder. **Covered by 10 round-trip + edge-case unit tests in `src/test/.../SnapshotCodecTest.kt`** (full-fidelity round-trip, empty snapshot, nullable handling both ways, unknown-enum tolerance, backup-local-fields-never-serialised, JSON validity, schema version preservation, list-of-strings round-trip, missing-optional-fields tolerance).
+- `data/BackupService.kt` — SAF + DocumentFile glue. `setBackupFolder(uri)` calls `takePersistableUriPermission` then resolves and stores the folder display name in DataStore. `backupNow()` exports a snapshot, encodes JSON, computes SHA-256, and skips the I/O if the hash matches the previous successful write. `restoreNow()` reads the file, refuses on schema-version mismatch, and atomically wipes-and-replaces via `LiftingRepository.importSnapshot`. Returns `BackupResult` / `RestoreResult` sealed classes so the UI can pattern-match success/skip/no-folder/no-access/error/schema-mismatch without parsing strings. **Hardened**: a `kotlinx.coroutines.sync.Mutex` (`ioMutex`) serialises backup + restore so a WorkManager auto-trigger and a user "Back up now" tap can't race each other; **atomic write** writes JSON to `lifting-tracker-snapshot.json.partial` first, verifies via SHA-256 readback, then deletes the prior final and renames the partial — torn-write window is one rename call, and `restoreNow` falls back to the partial if the final is missing (recovery from a crash mid-rename).
+- `data/BackupWorker.kt` — `CoroutineWorker` that calls `BackupService.backupNow()`. Maps `Success`/`Skipped` → `Result.success`, `NoFolder`/`NoAccess` → `Result.success` (don't burn battery on backoff for a permanent config issue), `Error` → `Result.retry` (transient I/O — WorkManager applies exponential backoff).
+- `data/BackupScheduler.kt` — thin wrapper over `WorkManager.enqueueUniqueWork(KEEP, ...)`. `KEEP` policy means rapid-fire callers (multiple finishes, an overlap with manual backup) coalesce onto a single in-flight job; combined with the SHA short-circuit, a burst becomes "one I/O, then no-ops". `NetworkType.CONNECTED` constraint because the expected destination is a Drive folder.
+- `data/AppContainer.kt` — added `backup(context): BackupService` and `backupScheduler(context): BackupScheduler` providers.
+- `data/LiftingRepository.kt` — gained a `database: LiftingDatabase` constructor param (for `withTransaction { ... }` on import) and two new methods: `exportSnapshot(settings)` reads every user-authored row, `importSnapshot(snapshot)` does a `deleteAllPrograms()` cascade then ordered bulk inserts in a single transaction.
+- `data/db/ProgramDao.kt` / `SessionDao.kt` / `NoteDao.kt` — gained `getAll*()` (suspend) reads + bulk inserts (`insertPrograms`, `insertSessions`, `insertPerformedSets`, `insertAll` for notes). `ProgramDao.deleteAllPrograms()` is the only delete-all needed; cascade does the rest (programs → days → lifts → alternatives → sessions → performed_sets, plus notes via lift FK).
+- `data/Settings.kt` + `SettingsRepository.kt` — new persisted fields: `backupFolderUri`, `backupFolderName`, `lastBackupAt`, `lastBackupSha`, `hasCheckedForBackupRestore`. Atomic paired setter `setBackupFolder(uri, name)`. `setLastBackup(at, sha)` is also paired so the UI can't observe a fresh timestamp with a stale hash.
+- `ui/screens/BackupViewModel.kt` — single VM owning the Backup card. State combines `settings × accessibility × inProgress × restorePromptVisible`. Accessibility check fires once per URI change via `mapLatest` and caches in a StateFlow so per-recompose IPC is avoided. Events go through a `SharedFlow<String>` for snackbar feedback.
+- `ui/screens/BackupSection.kt` — Composable card under Settings. Shows status icon (`Cloud` / `CloudOff` / `ErrorOutline`) + folder name + last-backup age. Action buttons: "Set up backup" (no folder) / "Re-pick folder" (lost permission) / "Back up now" + "Restore" + "Change folder" + "Disconnect" (configured + accessible). Three confirm dialogs: restore, disconnect, and the auto-shown "found a backup, restore it?" prompt.
+- `ui/screens/ProfileScreen.kt` — added `SnackbarHost` to the Scaffold and a `BackupSection` row in the LazyColumn after the SETTINGS card.
+- `gradle/libs.versions.toml` + `app/build.gradle.kts` — added `androidx.documentfile:1.0.1`, `androidx.work:work-runtime-ktx:2.9.1`, and `org.json:json:20231013` (testImplementation only — Android's android.jar bundles `org.json` but it's a stub jar that throws "Stub!" in JVM unit tests).
+- `ui/screens/TodayViewModel.kt` — gained a `BackupScheduler` constructor param; `finishSession()` now calls `backupScheduler.scheduleBackupNow()` after persisting the finish. Finish is the natural backup trigger: the user just made the most concrete change to their data and is most likely to want it persisted right now. The `KEEP` policy means a burst of taps coalesces; the SHA short-circuit means no-change finishes are no-ops.
+- `ui/screens/TodayScreen.kt` — passes the scheduler into the VM factory.
+
+**Restore-on-folder-pick flow** (replaces the original handoff's `MainActivity.onCreate`-based restore):
+- SAF URI grants do **not** survive an app uninstall. So on first launch after a fresh install, there is no `backupFolderUri` to check — there's nothing for `MainActivity.onCreate` to do. The flow is user-driven instead:
+  1. User installs → app seeds sample data normally.
+  2. User opens Profile → Set up backup → SAF picker → picks the same folder they used before.
+  3. `BackupViewModel.setBackupFolder` checks `hasExistingSnapshot()`. If there's already a snapshot AND `hasCheckedForBackupRestore` is false (DataStore was wiped at reinstall), it surfaces the **"Backup found — Restore?"** dialog (`restorePromptVisible = true`).
+  4. Restore → `LiftingRepository.importSnapshot` wipes + replaces the freshly-seeded sample data. Confirm → backup overwrites the file with current data.
+- `clearBackupFolder()` resets `hasCheckedForBackupRestore` so a deliberate disconnect-and-reconnect cycle re-arms the prompt.
+
+**Auto Backup is still wired** as a free belt-and-suspenders fallback (manifest `allowBackup="true"`, default-include rules). Don't disable it. But don't rely on it either — SAF is the load-bearing path now.
+
+What would *break* SAF backup:
+- Removing `androidx.documentfile` — the `DocumentFile.fromTreeUri` helper is the whole tree-traversal API.
+- Forgetting `takePersistableUriPermission` on pick — the URI works for one process and then dies.
+- Using `findFile` + `createFile` *without* the `delete()` between them — `createFile` creates a sibling rather than overwriting, so you'd accumulate `lifting-tracker-snapshot (1).json`, `(2).json`, etc.
+- Encoding settings' backup-local fields into the snapshot — restore would clobber the device's freshly-set folder URI with a stale one from another device. The `SnapshotCodecTest`'s `backup-local settings are never serialised` test guards this.
+- Bypassing the `ioMutex` in `BackupService` (e.g. exposing a public `backupNowWithoutLock`) — concurrent backups can race the SHA short-circuit and result in either lost writes or duplicate I/O.
+- Skipping the `.partial` step on writes — without it, an OS kill or storage hiccup mid-write leaves a torn `lifting-tracker-snapshot.json` that's the only file the user has, and `restoreNow` will fail to parse it.
+- Bumping `LiftingDatabase.version` without bumping `Snapshot.CURRENT_SCHEMA_VERSION` (or vice-versa) — the version mismatch surfaces as `RestoreResult.SchemaMismatch` even when the data shape didn't actually change. Keep them in lockstep until we add a real migration path.
 
 ## Not yet
 
@@ -177,10 +229,7 @@ What would *break* the Auto-Backup fallback (still worth not breaking, even if w
 - `Units` row toggles LB↔KG on tap with no picker affordance. Functional, but if you'd rather have a proper picker (or segmented control), add a small sheet.
 - `Dark theme` switch is **binary only** — once flipped, you can't get back to `ThemeMode.SYSTEM` from the UI. The persistence layer supports it; the JSX doesn't show that affordance, so no UI yet. Easy add when you decide on the control (segmented Light/Auto/Dark would be the M3 pattern).
 - `Material You` toggle — not in the JSX. Persisted state exists (`useDynamicColor`); just not surfaced. If you decide to expose it, add a row consistent with the others.
-- `cycleNumber` displayed in the header subtitle is hardcoded to `1`. Should become an actual counter once "advance week past `cycleLength` rolls cycle++" lands (see below).
-
-**Settings auto-advance**
-- `currentWeek` only changes when the user taps something (no `setCurrentWeek` UI exists yet, even). On a working app you'd want it to auto-advance every 7 days — track `weekStartedAt: Long` (a real epoch millis) and compute `currentWeek = ((now - weekStartedAt) / 7d) % cycleLength + 1`. Or expose a "tap to start week N+1" CTA somewhere.
+- `cycleNumber` is now real (derived from `cycleStartedAt + cycleLength` via `weekAndCycle`). What's still missing is a **manual override CTA** — there's no UI to nudge the cycle when life gets in the way (e.g. "I skipped a week, slide me back to week 3"). The setter exists (`settingsRepo.setCycleStartedAt(cycleAnchorFor(week))`); just no affordance.
 
 **Migrations**
 - `LiftingDatabase` uses `fallbackToDestructiveMigration(dropAllTables = true)`. Schema bumps still wipe the DB. Write proper `Migration(n, n+1)` objects before any production-style milestone — Auto Backup snapshots can save the previous version on uninstall/reinstall, but a routine app update with a destructive migration nukes the user's data in place.
@@ -188,7 +237,7 @@ What would *break* the Auto-Backup fallback (still worth not breaking, even if w
 **Other screens still placeholder or missing**
 - **Programs library** (`screens/extras2.jsx` `ProgramSelectScreen`) — Profile → "Program" jumps straight into ProgramEdit today; the library screen would slot between as Profile → ProgramSelect → ProgramEdit.
 - **Onboarding** (`screens/extras2.jsx` `OnboardingScreen`).
-- **Exercise DB browser** (`screens/extras2.jsx` `ExerciseDBScreen`) — data layer (`CatalogDao` + `assets/exercises.json`) is in. What's missing is a standalone screen that lets the user search and tap into a lift's profile (or back-fill into Lift Edit's identity card). See "Suggested next steps" #2.
+- **Exercise DB browser standalone entry point** — `ExerciseDBScreen` itself is now wired (Lift Edit → identity card → picker). What's still missing is a top-level entry from Profile / nav so the user can browse the library without being mid-edit. The screen is callback-driven (`onPick: (CatalogLift) -> Unit`), so a new route can pop into a "lift profile" page or just back-fill different state.
 - **Reminders** screen + actual notification scheduling. Reminders intentionally do NOT include a rest-timer setting — it's the "remind me to lift" notification only.
 
 **Exercise Detail polish**
@@ -204,44 +253,27 @@ What would *break* the Auto-Backup fallback (still worth not breaking, even if w
 
 ## Suggested next steps (in order)
 
-1. **Drive AppData sync** — the next persistence work, since Auto Backup proved unreliable. **Stub follows in its own section below.**
-2. **Lift-edit exercise picker → catalog browser.** The 3-field `ExerciseIdentityDialog` in `LiftEditScreen` is a placeholder: it lets the user type name / muscle / equipment by hand. Replace it with a navigation push to a new `ExerciseDBScreen` (matches `extras2.jsx`'s `ExerciseDBScreen` — search field at top, muscle filter chips, list of `CatalogLiftEntity` rows). Picking a row should populate `viewModel.setIdentity(name, muscle, equipment)` and pop back. Existing data layer (`CatalogDao.search` / `byPrimaryMuscle` / `page`) covers everything you need.
-3. **Drag-to-reorder days and lifts.** The JSX shows drag handles on `ProgramEditDayRow` / `DayEditLiftRow`. Not implemented — current behaviour is that order is whatever `orderIndex` says (set at insert). Reordering needs either Compose's `reorderable` library or a hand-rolled long-press-and-drag with a swap-orderIndex repo helper. Off the critical path for a personal app; flag if it stops mattering.
-4. **Programs library + Onboarding** per `screens/extras2.jsx`. Programs library can replace the direct Profile→ProgramEdit route (Profile→ProgramSelect→Edit). Onboarding is first-run only (gate on a new `hasOnboarded: Boolean` setting).
-5. **Reminders.** Reminders setting row + actual notification scheduling via `WorkManager`. Intentional omission: no rest-timer setting.
-6. **Auto-advance week** + cycle counter. Drive both from a `cycleStartedAt: Long` setting. Cycle increments when `currentWeek` rolls past `cycleLength`.
-7. **Migrations** before any "real" build. Pair every schema change with a `Migration(n, n+1)`. The catalog table at v3 is the most recent destructive bump.
-8. **Set logging variants B and C** behind a debug flag.
+The next two items are pre-scoped "bundles" — each fits comfortably in a single working session. The ones after that are smaller residual hygiene/polish.
 
-## Next: Drive AppData sync (stub for the next session)
+1. **Bundle C — Reminders end-to-end.** Reminders setting row in Profile + actual notification scheduling via `WorkManager` (one-shot or daily-recurring). On API 33+ this needs a `POST_NOTIFICATIONS` permission flow before the first reminder schedules; show a rationale sheet rather than failing silently. Suggested data: a single Reminder per active program day (selectable subset), persisted in DataStore (or a tiny `reminders` Room table if multiple per day end up needed). Channel id should be a stable constant so reminders survive app restarts. **Intentional omission**: no rest-timer setting (cut from scope, see "Cut from scope" below). The Profile JSX shows a "Reminders" row with trailing "Firm" — wire its tap to a new `RemindersScreen` route.
 
-**Why this is the work, not Auto Backup.** Auto Backup is technically wired (manifest + XML rules) but the user already confirmed an uninstall lost their data — the ~24h-idle-charging-Wi-Fi precondition for the first snapshot is too fragile. We need an explicit, user-controllable backup that they can *see* worked. The right tool is the Google **Drive REST API with the `drive.appdata` scope** + Sign-In via Credential Manager. Quote-unquote "Drive" because the AppData folder is invisible to the user, doesn't count against their Drive quota, and only this app can read/write its contents. No general-purpose Drive permissions, no scary consent screens.
+2. **Bundle D — Today screen polish bundle.** Several Today TODOs ship close together because they share the same screen state:
+   - **Notes bottom sheet** — `TodayViewModel` already has `openNotesSheet(liftId)` + `addNote(...)` + `notesByLift`; what's missing is the actual sheet UI (paralleling `SwapSheet.kt`). Render existing notes for that lift, show a `BasicTextField` and "Save" + a "Whoopsy?" toggle (logs as `whoopsy = true`).
+   - **Swap "apply to today" wiring** — `applySwap(liftId, alternative)` already updates `swapsByLift`. The current TodayScreen shows the swapped name in the lift card but the SwapSheet on Detail just closes (browse-only). Also wire Detail's swap → Today by hopping through saved-state-handle (mirrors the catalog picker pattern).
+   - **Finish-session confirmation snackbar with undo** — `finishSession()` persists immediately. Add a Scaffold-level `SnackbarHostState` that shows "Session finished" + "Undo" → calls a new `repo.unfinishSession(id)`.
+   - **Today top-bar handlers** — Menu / Calendar / More IconButtons in `TodayScreen.kt` are no-ops. Calendar should jump to History; Menu/More can either be removed or wired to small dropdown menus.
 
-**Scope (one session of work, maybe two):**
-1. **Add Sign-In.** Use Credential Manager (`androidx.credentials`) instead of the deprecated GoogleSignInClient — it's the new canonical path. The user picks a Google account once via the Credential Manager bottom sheet; we get an ID token + GoogleIdTokenCredential. Persist the account email in DataStore (`AppSettings.googleAccountEmail`) so we can show "Backing up to alex@gmail.com" in Profile.
-2. **Acquire an OAuth access token for Drive AppData.** Add `play-services-auth` and use `GoogleAuthUtil.getToken(context, account, "oauth2:https://www.googleapis.com/auth/drive.appdata")`. Refresh on 401. Wrap in a small `DriveBackupService` class.
-3. **Snapshot format.** Single JSON blob: `{schemaVersion: 3, exportedAt: <epochMillis>, settings: AppSettings, program: ProgramWithStructure, sessions: [...], performedSets: [...], notes: [...]}`. Use `org.json` (already a dependency via Catalog seeder) — same reason as the catalog parse: avoids a serialization framework just for one use case. Cap size at ~5 MB (well under Drive AppData's per-file limit). Filename: `lifting-tracker-snapshot.json` (single file, overwritten each backup).
-4. **Drive REST calls** (no SDK; just OkHttp + the bearer token):
-   - List: `GET https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=files(id,modifiedTime,size)` — returns the existing snapshot if any.
-   - Upload: `POST https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&spaces=appDataFolder` (or `PATCH .../files/{id}` for overwrite).
-   - Download: `GET .../files/{id}?alt=media`.
-5. **UI.** Profile's "Settings" card gains a `Backup` row showing last-backup timestamp + a "Back up now" button + a "Restore from backup" button (with a confirm dialog because restore replaces local data). Last-backup time is persisted in DataStore. On first launch after a fresh install, if a snapshot exists in Drive AppData, prompt "Restore your data?" before letting the user start lifting (one-shot prompt gated on a `hasCheckedForBackupRestore` setting).
-6. **Auto-trigger.** Once manual backup works, schedule a periodic `WorkManager` job (constraints: connected, charging-or-not depending on user pref) that runs `DriveBackupService.backupNow()`. Skip if the snapshot hasn't changed since last upload (compare a SHA-256 of the JSON).
-7. **Settings additions** (`AppSettings`): `googleAccountEmail: String?`, `googleAccountId: String?`, `lastBackupAt: Long`, `lastBackupSha: String`, `hasCheckedForBackupRestore: Boolean`.
+3. **Standalone Exercise DB browser entry point.** Lift Edit's picker flow is shipped (see "Exercise DB picker" above), but there's no top-level way to browse the library — Profile → "Exercises" or similar. The screen is callback-driven (`onPick: (CatalogLift) -> Unit`), so a Profile-rooted route could either (a) navigate into a future `ExerciseProfileScreen` (cues, history, related lifts) or (b) just preview the row. Decide which use case matters before wiring.
 
-**Things to know going in:**
-- AppData scope still requires a Cloud Console OAuth client + a SHA-1 fingerprint of the signing key in `google-services.json`. Set this up before writing code; without it `getToken` will fail with `UserRecoverableAuthException`.
-- Credential Manager works on API 24+ via the AndroidX wrapper, but the actual Google Sign-In bottom sheet path needs Play Services. That's fine for our minSdk 24 since AOSP-without-Play is out of scope for a personal app.
-- Restore must run *before* the Compose nav graph composes Today, otherwise you'll race the Room seeder. Stick the check in `MainActivity.onCreate` before `setContent`, blocking on a brief progress UI.
-- This *replaces* Auto Backup as the persistence story — but don't disable Auto Backup. It's a free-tier safety net for the case where Sign-In fails or the user denies the permission. Leave the manifest flags alone.
+4. **Manual week override CTA.** Auto-advance is shipped, but there's no UI to nudge the cycle when life gets in the way ("I skipped a week, slide me back to week 3"). Add a small dialog/sheet from Profile (or the Program ring) that calls `settingsRepo.setCycleStartedAt(cycleAnchorFor(targetWeek))`. Keep it tucked away — the auto-advance covers the common case.
 
-**Files that will change:**
-- `data/Settings.kt` + `SettingsRepository.kt` — new persisted fields.
-- `data/DriveBackupService.kt` (new) — Sign-In, token, snapshot, upload/download.
-- `data/AppContainer.kt` — provide the service.
-- `ui/screens/ProfileScreen.kt` — Backup section in the Settings card.
-- `MainActivity.kt` — first-launch restore check.
-- `app/build.gradle.kts` + `gradle/libs.versions.toml` — `androidx.credentials:credentials`, `androidx.credentials:credentials-play-services-auth`, `com.google.android.libraries.identity.googleid:googleid`, `com.squareup.okhttp3:okhttp`.
+5. **Drag-to-reorder days and lifts.** The JSX shows drag handles on `ProgramEditDayRow` / `DayEditLiftRow`. Not implemented — current behaviour is that order is whatever `orderIndex` says (set at insert). Reordering needs either Compose's `reorderable` library or a hand-rolled long-press-and-drag with a swap-orderIndex repo helper. Off the critical path for a personal app; flag if it stops mattering.
+
+6. **Programs library + Onboarding** per `screens/extras2.jsx`. Programs library can replace the direct Profile→ProgramEdit route (Profile→ProgramSelect→Edit). Onboarding is first-run only (gate on a new `hasOnboarded: Boolean` setting). The onboarding flow is also the natural place to introduce backup setup (skip-able).
+
+7. **Migrations** before any "real" build. Pair every schema change with a `Migration(n, n+1)`. The catalog table at v3 is the most recent destructive bump. **Critical for backup**: a snapshot's `schemaVersion` must continue to match the running DB version, or `BackupService.restoreNow` returns `SchemaMismatch` and bails. When you bump the DB, also bump `Snapshot.CURRENT_SCHEMA_VERSION` and add a "snapshot from version N" migration path in the codec or in BackupService.
+
+8. **Set logging variants B (numpad) and C (quick-tap)** behind a debug flag.
 
 ## Key decisions — don't re-debate
 
@@ -250,7 +282,7 @@ What would *break* the Auto-Backup fallback (still worth not breaking, even if w
 - **Semantic colors** (effort/deload/rest/chart) are NOT dynamic — fixed per theme. Access via `MaterialTheme.appColors.effortHigh` (CompositionLocal pattern).
 - **Naming**: `Lt*` prefix for primitives/wrappers to avoid clashing with `androidx.compose.material3.*`.
 - **Preview convention**: force `dynamicColor = false` in every `@Preview` so AS shows the brand scheme. Previews stay; the user "ignores" them — don't strip.
-- **Personal-use scope, with reliable backup as a known gap**: app is offline-only / no Sign-In *today*, but Auto Backup turned out unreliable in real testing (see revised "Auto Backup" section). Drive AppData sync is the next persistence work — see "Next: Drive AppData sync" section. The cloud commitment is bounded: AppData scope only, no general-Drive permissions, no Firestore / Supabase, no analytics.
+- **Personal-use scope, with reliable backup via SAF**: app is offline-only / no Sign-In. Backup uses the Storage Access Framework — user picks a folder once (typically in their Drive via the Drive Android app's SAF provider), and we read/write `lifting-tracker-snapshot.json` there. No OAuth, no Cloud Console, no `google-services.json`, no Play Services. Drive AppData was rejected because the OAuth setup ceremony wasn't worth the marginal "no folder pick" UX win. Auto Backup remains wired as a free safety net but isn't the load-bearing path.
 - **Catalog data source**: free-exercise-db (yuhonas/free-exercise-db, Unlicense). Slim JSON shipped at `assets/exercises.json`, parsed into the `catalog_lifts` table on first launch via `CatalogSeeder` (uses `org.json` — no kotlinx.serialization). Don't bundle the upstream's `images[]` or `instructions[]` until we actually render them; the seeder relies on the slimmed shape.
 - **Catalog vs program lifts**: separate tables. `LiftEntity` rows are user-customised program lifts attached to a Day; `CatalogLiftEntity` rows are read-only library definitions. Swap maps catalog rows into the existing `Alternative` domain type via `CatalogLiftEntity.toAlternative` so the Sheet UI takes one list type. Curated `AlternativeEntity` rows still live in their own table and render as the `RECOMMENDED` section above the catalog matches.
 - **Muscle name normalization**: free-exercise-db uses lowercase like `quadriceps` / `abdominals`; legacy `LiftEntity.muscle` uses `Quads` / `Core`. `CatalogSeeder.normalizeMuscle` is the source of truth — both sides are normalised before matching. Display uses `Mappers.displayMuscle` (title-case).
@@ -276,6 +308,8 @@ What would *break* the Auto-Backup fallback (still worth not breaking, even if w
 - `app/src/main/java/com/colewinfield/liftingtracker/ui/screens/ProgramEditScreen.kt` / `DayEditScreen.kt` / `LiftEditScreen.kt` (+ matching `*ViewModel.kt`s) — worked examples for an in-memory edit-buffer pattern over Room (load-once, mutate buffer, save commits).
 - `app/src/main/java/com/colewinfield/liftingtracker/ui/screens/SwapSheetViewModel.kt` + `SwapSheet.kt` — worked example for a sheet-scoped VM that loads multiple parallel queries and runs a debounced text search.
 - `app/src/main/java/com/colewinfield/liftingtracker/data/CatalogSeeder.kt` + `db/CatalogDao.kt` — the asset-backed seed pattern (`org.json` parse, batch insert, idempotent re-run check).
+- `app/src/main/java/com/colewinfield/liftingtracker/data/BackupService.kt` + `Snapshot.kt` + `SnapshotCodec.kt` — SAF backup. The codec is pure (Snapshot ↔ String) and testable in isolation; the service holds the SAF + DocumentFile + URI-permission glue.
+- `app/src/main/java/com/colewinfield/liftingtracker/ui/screens/BackupSection.kt` + `BackupViewModel.kt` — worked example for: SAF picker via `rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree())`, `SharedFlow<String>`-backed snackbar feedback from a VM, an in-VM async accessibility check feeding a UI flag, and a one-shot dialog gated on a setting (`hasCheckedForBackupRestore`).
 - `app/src/main/java/com/colewinfield/liftingtracker/data/` — Room entities, DAOs, repository, mappers, seeders.
 
 ## Auto-memory

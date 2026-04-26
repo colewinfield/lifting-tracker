@@ -33,13 +33,16 @@ import com.colewinfield.liftingtracker.ui.components.LtNavItem
 import com.colewinfield.liftingtracker.ui.navigation.LtDestination
 import com.colewinfield.liftingtracker.ui.screens.DayEditScreen
 import com.colewinfield.liftingtracker.ui.screens.DetailTab
+import com.colewinfield.liftingtracker.ui.screens.ExerciseDBScreen
 import com.colewinfield.liftingtracker.ui.screens.ExerciseDetailScreen
+import com.colewinfield.liftingtracker.ui.screens.ExercisePickerResult
 import com.colewinfield.liftingtracker.ui.screens.HistoryScreen
 import com.colewinfield.liftingtracker.ui.screens.LiftEditScreen
 import com.colewinfield.liftingtracker.ui.screens.NEW_ID
 import com.colewinfield.liftingtracker.ui.screens.ProgramEditScreen
 import com.colewinfield.liftingtracker.ui.screens.ProgramScreen
 import com.colewinfield.liftingtracker.ui.screens.ProfileScreen
+import com.colewinfield.liftingtracker.ui.screens.RemindersScreen
 import com.colewinfield.liftingtracker.ui.screens.TodayScreen
 import com.colewinfield.liftingtracker.ui.theme.LiftingTrackerTheme
 
@@ -136,7 +139,11 @@ fun LiftingTrackerApp() {
             composable(LtDestination.You.route) {
                 ProfileScreen(
                     onEditProgram = { navController.navigate("program/edit") },
+                    onOpenReminders = { navController.navigate("reminders") },
                 )
+            }
+            composable("reminders") {
+                RemindersScreen(onBack = { navController.popBackStack() })
             }
             composable("program/edit") {
                 ProgramEditScreen(
@@ -175,6 +182,21 @@ fun LiftingTrackerApp() {
                     liftId = liftId,
                     dayId = dayId,
                     onBack = { navController.popBackStack() },
+                    onPickExercise = { navController.navigate("exercise/picker") },
+                    pickerResultHandle = entry.savedStateHandle,
+                )
+            }
+            composable("exercise/picker") {
+                ExerciseDBScreen(
+                    onBack = { navController.popBackStack() },
+                    onPick = { lift ->
+                        navController.previousBackStackEntry?.savedStateHandle?.let { handle ->
+                            handle[ExercisePickerResult.NAME_KEY] = lift.name
+                            handle[ExercisePickerResult.MUSCLE_KEY] = lift.displayMuscle
+                            handle[ExercisePickerResult.EQUIPMENT_KEY] = lift.displayEquipment
+                        }
+                        navController.popBackStack()
+                    },
                 )
             }
             composable(

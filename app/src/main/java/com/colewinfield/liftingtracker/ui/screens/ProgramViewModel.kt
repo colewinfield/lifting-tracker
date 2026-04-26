@@ -4,10 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.colewinfield.liftingtracker.data.AppSettings
 import com.colewinfield.liftingtracker.data.LiftingRepository
 import com.colewinfield.liftingtracker.data.Program
 import com.colewinfield.liftingtracker.data.SettingsRepository
+import com.colewinfield.liftingtracker.data.weekAndCycle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -40,7 +40,7 @@ class ProgramViewModel(
         settingsRepo.settings,
         selectedWeekOverride,
     ) { program, settings, override ->
-        val current = settings.currentWeek
+        val current = weekAndCycle(settings.cycleStartedAt, program?.cycleLength ?: 1).week
         ProgramUiState(
             program = program,
             currentWeek = current,
@@ -49,10 +49,7 @@ class ProgramViewModel(
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = ProgramUiState.Empty.copy(
-            currentWeek = AppSettings.Defaults.currentWeek,
-            selectedWeek = AppSettings.Defaults.currentWeek,
-        ),
+        initialValue = ProgramUiState.Empty,
     )
 
     init {

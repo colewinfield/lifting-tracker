@@ -91,4 +91,20 @@ interface SessionDao {
         ORDER BY s.date DESC
     """)
     suspend fun sessionsWithLift(liftId: String): List<SessionEntity>
+
+    // ----- Snapshot export / bulk insert -----
+    // (No delete-all here — sessions / performed_sets cascade from programs via days, so
+    // ProgramDao.deleteAllPrograms is sufficient for the restore wipe.)
+
+    @Query("SELECT * FROM sessions")
+    suspend fun getAllSessionsList(): List<SessionEntity>
+
+    @Query("SELECT * FROM performed_sets")
+    suspend fun getAllPerformedSetsList(): List<PerformedSetEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSessions(sessions: List<SessionEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPerformedSets(sets: List<PerformedSetEntity>)
 }

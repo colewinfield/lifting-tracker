@@ -22,4 +22,14 @@ interface NoteDao {
 
     @Query("DELETE FROM notes WHERE id = :id")
     suspend fun deleteNote(id: Long)
+
+    // ----- Snapshot export -----
+    // (No delete-all here — notes cascade from lifts via the lift FK, so
+    // ProgramDao.deleteAllPrograms is sufficient for the restore wipe.)
+
+    @Query("SELECT * FROM notes")
+    suspend fun getAllNotes(): List<NoteEntity>
+
+    @Insert
+    suspend fun insertAll(notes: List<NoteEntity>)
 }
